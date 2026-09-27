@@ -16,61 +16,28 @@ Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
 
 ## Module Structure
 
-- **app**: Main application module with UI, ViewModels, and core logic
-- **ai**: AI SDK abstraction layer for different providers (OpenAI, Google, Anthropic)
-- **common**: Common utilities and extensions
-- **document**: Document parsing module for handling PDF, DOCX, PPTX, and EPUB files
-- **highlight**: Code syntax highlighting implementation
-- **material3**: Material color utility extensions used by the app UI
-- **search**: Search functionality SDK for multiple providers (Exa, Tavily, Zhipu, Bing, Brave, SearXNG, and others)
-- **speech**: Speech module for TTS and ASR implementations
-- **web**: Embedded web server module that provides Ktor server startup function and hosts static frontend build files (
-  built from web-ui/ React project)
-- **workspace**: Sandboxed per-workspace file system and shell execution environment exposed to the AI as tools.
+- **app**: App UI + data (Assistant/Conversation/Transformer) -> `app/AGENTS.md`
+- **ai**: AI SDK + UIMessage/providers/registry -> `ai/AGENTS.md`
+- **search**: Search services + Key pool -> `search/AGENTS.md`
+- **highlight**: Code highlighting + fixtures -> `highlight/AGENTS.md`
+- **speech**: TTS/ASR -> `speech/AGENTS.md`
+- **workspace**: Sandbox FS + shell tools -> `workspace/AGENTS.md`
+- **document**: PDF/DOCX/PPTX/EPUB parsing -> `document/AGENTS.md`
+- **web**: Ktor static server (build output from web-ui) -> `web-ui/AGENTS.md` (Build Process)
+- **web-ui**: Embedded React SPA -> `web-ui/AGENTS.md`
+- **locale-tui**: strings.xml TUI tool -> `locale-tui/AGENTS.md`
+- **common/material3/videogen/trace-cli/oauth/build-logic**: small shared modules, no separate guide.
 
-## Concepts
+## Git / Branch / Upstream Sync（fork私用，不提PR）
 
-- **Assistant**: An assistant configuration with system prompts, model parameters, and conversation isolation. Each
-  assistant maintains its own settings including temperature, context size, custom headers, tools, memory options, regex
-  transformations, and prompt injections (mode/lorebook). Assistants provide isolated chat environments with specific
-  behaviors and capabilities. (app/src/main/java/me/rerere/rikkahub/data/model/Assistant.kt)
+- Remotes: `origin = git@github.com:yanwen0614/rikkahub.git` (sole push target, SSH);
+  `upstream = https://github.com/rikkahub/rikkahub.git` (official read-only, never push).
+- Work branch: daily use `dev/refactor` (tracks `origin/dev/refactor`).
+- `master`: mirror only. Sync: `git checkout master && git fetch upstream && git merge --ff-only upstream/master && git push origin master`. Non-FF -> stop, investigate.
+- Sync upstream into work (merge, keep history): `git checkout dev/refactor && git fetch upstream && git merge upstream/master && git push origin dev/refactor`. No rebase, no `push upstream`, keep `pull.rebase=false`.
+- Daily check: `git rev-list --left-right --count HEAD...upstream/master`, merge first if behind.
+- Upstream branches `feat/context-limit、refactor/ai-stream、refactor/chat-service` ignored by default, `git fetch upstream <branch>` on demand.
 
-- **Conversation**: A persistent conversation thread between the user and an assistant. Each conversation maintains a
-  list of MessageNodes in a tree structure to support message branching, along with metadata like title, creation time,
-  update time, pin status, chat suggestions, optional conversation-level system prompt, and prompt injection bindings. (
-  app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
+## Skills
 
-- **UIMessage**: A platform-agnostic message abstraction that encapsulates chat messages with different types of content
-  parts (text, images, documents, reasoning, tool calls/results, etc.). Each message has a role (USER, ASSISTANT,
-  SYSTEM, TOOL), creation timestamp, model ID, token usage information, and optional annotations. UIMessages support
-  streaming updates through chunk merging. (ai/src/main/java/me/rerere/ai/ui/Message.kt)
-
-- **MessageNode**: A container holding one or more UIMessages to implement message branching functionality. Each node
-  maintains a list of alternative messages and tracks which message is currently selected (selectIndex). This enables
-  users to regenerate responses and switch between different conversation branches, creating a tree-like conversation
-  structure. (app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
-
-- **Message Transformer**: A pipeline mechanism for transforming messages before sending to AI providers (
-  InputMessageTransformer) or after receiving responses (OutputMessageTransformer). Transformers can modify message
-  content, add metadata, apply templates, handle special tags, convert formats, and perform OCR. Common transformers
-  include:
-  - TemplateTransformer: Apply Pebble templates to user messages with variables like time/date
-  - ThinkTagTransformer: Extract `<think>` tags and convert to reasoning parts
-  - RegexOutputTransformer: Apply regex replacements to assistant responses
-  - DocumentAsPromptTransformer: Convert document attachments to text prompts
-  - Base64ImageToLocalFileTransformer: Convert base64 images to local file references
-  - OcrTransformer: Perform OCR on images to extract text
-
-  Output transformers support `visualTransform()` for UI display during streaming and `onGenerationFinish()` for final
-  processing after generation completes.
-  (app/src/main/java/me/rerere/rikkahub/data/ai/transformers/Transformer.kt)
-
-## Internationalization
-
-- String resources are usually located in `app/src/main/res/values*/strings.xml`; feature modules such as `search`
-  may also maintain their own `values*/strings.xml`
-- Use `stringResource(R.string.key_name)` in Compose
-- Page-specific strings should use page prefix (e.g., `setting_page_`)
-- If the user does not explicitly request localization, prioritize implementing functionality without considering
-  localization. (e.g `Text("Hello world")`)
-- For `locale-tui` operations, use the `locale-tui-localization` skill.
+- `.agents/skills/`: `claude-api/gemini-api-dev/gemini-interactions-api` (provider APIs), `find-hugeicons` (Compose icons), `locale-tui-localization` (strings.xml ops), `publish-release` (release flow).
