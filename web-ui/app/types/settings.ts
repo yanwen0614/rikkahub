@@ -90,6 +90,9 @@ export interface McpCommonOptions {
   enable: boolean;
   name: string;
   tools: McpToolOption[];
+  // Key 池：多 key 用换行/空格/逗号分隔，请求头值中用 ${key} 占位符引用；keyCooldownHours 为冷却小时数
+  keys?: string;
+  keyCooldownHours?: number;
   [key: string]: unknown;
 }
 

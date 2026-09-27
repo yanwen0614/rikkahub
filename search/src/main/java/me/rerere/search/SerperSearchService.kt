@@ -16,7 +16,6 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -55,15 +54,18 @@ object SerperSearchService : SearchService<SearchServiceOptions.SerperOptions> {
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.SerperOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
-        runCatching {
-            val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
+        val query = params["query"]?.jsonPrimitive?.content
+            ?: return@withContext Result.failure(IllegalArgumentException("query is required"))
 
-            val body = buildJsonObject {
-                put("q", query)
-                put("num", commonOptions.resultSize)
-            }
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
-
+        val body = buildJsonObject {
+            put("q", query)
+            put("num", commonOptions.resultSize)
+        }
+        withKeyRetry(
+            keys = serviceOptions.apiKey,
+            providerId = serviceOptions.id.toString(),
+            cooldownMillis = keyCooldownHoursToMillis(serviceOptions.keyCooldownHours),
+        ) { apiKey ->
             val request = Request.Builder()
                 .url("https://google.serper.dev/search")
                 .post(body.toString().toRequestBody())
@@ -71,30 +73,34 @@ object SerperSearchService : SearchService<SearchServiceOptions.SerperOptions> {
                 .addHeader("Content-Type", "application/json")
                 .build()
 
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string()
-                val searchResponse = json.decodeFromString<SerperSearchResponse>(responseBody)
+            httpClient.newCall(request).await().use { response ->
+                if (response.isSuccessful) {
+                    val responseBody = response.body.string()
+                    val searchResponse = json.decodeFromString<SerperSearchResponse>(responseBody)
 
-                val answer = searchResponse.answerBox?.let { it.answer ?: it.snippet }
-                    ?: searchResponse.knowledgeGraph?.description
+                    val answer = searchResponse.answerBox?.let { it.answer ?: it.snippet }
+                        ?: searchResponse.knowledgeGraph?.description
 
-                val items = searchResponse.organic.map { result ->
-                    SearchResultItem(
-                        title = result.title,
-                        url = result.link,
-                        text = result.snippet ?: ""
-                    )
-                }
+                    val items = searchResponse.organic.map { result ->
+                        SearchResultItem(
+                            title = result.title,
+                            url = result.link,
+                            text = result.snippet ?: ""
+                        )
+                    }
 
-                return@withContext Result.success(
                     SearchResult(
                         answer = answer,
                         items = items
                     )
-                )
-            } else {
-                error("Serper search failed with code ${response.code}: ${response.message}")
+                } else {
+                    val respBody = runCatching { response.body.string() }.getOrNull()
+                    throw SearchHttpException(
+                        response.code,
+                        respBody,
+                        "Serper search failed with code ${response.code}: ${response.message}"
+                    )
+                }
             }
         }
     }

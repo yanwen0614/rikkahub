@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -71,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -844,6 +846,103 @@ private fun McpCommonOptionsConfigure(
                 }
             }
         }
+
+        HorizontalDivider()
+
+        // API Key 池：header 值支持 ${key} 占位符，key 列表单独配置
+        McpKeyPoolConfigure(config = config, update = update)
+    }
+}
+
+@Composable
+private fun McpKeyPoolConfigure(
+    config: McpServerConfig,
+    update: (McpServerConfig) -> Unit,
+) {
+    fun updateCommon(transform: (McpCommonOptions) -> McpCommonOptions) {
+        val next = transform(config.commonOptions)
+        update(
+            when (config) {
+                is McpServerConfig.SseTransportServer -> config.copy(commonOptions = next)
+                is McpServerConfig.StreamableHTTPServer -> config.copy(commonOptions = next)
+            }
+        )
+    }
+
+    FormItem(
+        label = {
+            Text(stringResource(R.string.setting_mcp_page_key_pool_title))
+        },
+        description = {
+            Text(stringResource(R.string.setting_mcp_page_key_pool_desc))
+        }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            var keysVisible by rememberSaveable { mutableStateOf(false) }
+            OutlinedTextField(
+                value = config.commonOptions.keys,
+                onValueChange = { v -> updateCommon { it.copy(keys = v) } },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(stringResource(R.string.setting_mcp_page_key_pool_hint)) },
+                minLines = 2,
+                visualTransformation = if (keysVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { keysVisible = !keysVisible }) {
+                        Icon(
+                            if (keysVisible) HugeIcons.ViewOff else HugeIcons.View,
+                            contentDescription = null
+                        )
+                    }
+                }
+            )
+            OutlinedTextField(
+                value = config.commonOptions.keyCooldownHours.toString(),
+                onValueChange = { v ->
+                    v.toIntOrNull()?.let { hours -> updateCommon { it.copy(keyCooldownHours = hours.coerceAtLeast(1)) } }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.setting_mcp_page_key_cooldown)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            // 校验提示：keys 非空但无占位符、URL 含占位符（不支持）
+            val serverUrl = when (config) {
+                is McpServerConfig.SseTransportServer -> config.url
+                is McpServerConfig.StreamableHTTPServer -> config.url
+            }
+            if (config.commonOptions.keys.isNotBlank() &&
+                config.commonOptions.headers.none { it.second.contains("\${key}") }
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_mcp_page_key_pool_no_placeholder),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (serverUrl.contains("\${key}")) {
+                Text(
+                    text = stringResource(R.string.setting_mcp_page_key_pool_url_placeholder),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            // 只读状态行：共 N 个 key、M 个冷却中
+            val mcpManager = koinInject<McpManager>()
+            val snapshot = remember(config.commonOptions.keys, config.id) {
+                runCatching { mcpManager.keyPoolSnapshot(config) }.getOrNull()
+            }
+            if (config.commonOptions.keys.isNotBlank() && snapshot != null) {
+                Text(
+                    text = stringResource(
+                        R.string.setting_mcp_page_key_pool_status,
+                        snapshot.total,
+                        snapshot.cooling,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -1014,7 +1113,7 @@ private fun isValidMcpName(name: String): Boolean {
     return name.isEmpty() || name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
 }
 
-private fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
+internal fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
     val root = Json.parseToJsonElement(json).jsonObject
     val mcpServers = root["mcpServers"]?.jsonObject ?: return emptyList()
     return mcpServers.entries.mapNotNull { (name, element) ->
@@ -1024,7 +1123,23 @@ private fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
         val headers = obj["headers"]?.jsonObject?.entries?.map { (k, v) ->
             k to (v.jsonPrimitive.contentOrNull ?: "")
         } ?: emptyList()
-        val commonOptions = McpCommonOptions(name = name, headers = headers)
+        // 扩展字段可选识别：keys 接受字符串或数组，keyCooldownHours 为整数小时
+        val keysElement = obj["keys"]
+        val keys = when {
+            keysElement == null -> ""
+            keysElement is kotlinx.serialization.json.JsonArray -> keysElement.mapNotNull {
+                it.jsonPrimitive.contentOrNull
+            }.joinToString("\n")
+            else -> keysElement.jsonPrimitive.contentOrNull ?: ""
+        }
+        val keyCooldownHours = obj["keyCooldownHours"]?.jsonPrimitive?.contentOrNull
+            ?.toIntOrNull()?.coerceAtLeast(1) ?: 24
+        val commonOptions = McpCommonOptions(
+            name = name,
+            headers = headers,
+            keys = keys,
+            keyCooldownHours = keyCooldownHours,
+        )
         when (type) {
             "sse" -> McpServerConfig.SseTransportServer(commonOptions = commonOptions, url = url)
             else -> McpServerConfig.StreamableHTTPServer(commonOptions = commonOptions, url = url)

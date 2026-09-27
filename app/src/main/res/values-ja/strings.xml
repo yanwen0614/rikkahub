@@ -1380,4 +1380,16 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="setting_display_page_background_effect_type">背景効果の種類</string>
   <string name="setting_display_page_background_effect_blur">ぼかし</string>
   <string name="setting_display_page_background_effect_glass">ガラス</string>
+  <string name="search_detail_key_pool_desc">Multiple keys separated by newline/space/comma. Rotated per request; switches key on quota errors.</string>
+  <string name="search_detail_key_cooldown">Cooldown (hours)</string>
+  <string name="search_detail_key_pool_status">%1$d keys in total, %2$d in cooldown</string>
+  <string name="search_detail_key_pool_recovery">, next recovery: %1$s</string>
+  <string name="search_detail_key_pool_no_keys">No keys configured</string>
+  <string name="setting_mcp_page_key_pool_title">API Key Pool</string>
+  <string name="setting_mcp_page_key_pool_desc">Multiple keys separated by newline/space/comma. Use ${key} in a header value, e.g. Authorization: Bearer ${key}. Rotated per request.</string>
+  <string name="setting_mcp_page_key_pool_hint">One key per line</string>
+  <string name="setting_mcp_page_key_cooldown">Cooldown (hours)</string>
+  <string name="setting_mcp_page_key_pool_status">%1$d keys in total, %2$d in cooldown</string>
+  <string name="setting_mcp_page_key_pool_no_placeholder">Keys are set but no header contains ${key}</string>
+  <string name="setting_mcp_page_key_pool_url_placeholder">URL does not support ${key}</string>
 </resources>

@@ -1384,4 +1384,16 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_display_page_background_effect_type">背景效果类型</string>
   <string name="setting_display_page_background_effect_blur">模糊</string>
   <string name="setting_display_page_background_effect_glass">玻璃</string>
+  <string name="search_detail_key_pool_desc">多个 key 用换行/空格/逗号分隔，每次请求轮询，限额失败自动换 key 重试。</string>
+  <string name="search_detail_key_cooldown">冷却时长（小时）</string>
+  <string name="search_detail_key_pool_status">共 %1$d 个 key，%2$d 个冷却中</string>
+  <string name="search_detail_key_pool_recovery">，最近恢复：%1$s</string>
+  <string name="search_detail_key_pool_no_keys">未配置 key</string>
+  <string name="setting_mcp_page_key_pool_title">API Key 池</string>
+  <string name="setting_mcp_page_key_pool_desc">多个 key 用换行/空格/逗号分隔，在请求头值中使用 ${key}，例如 Authorization: Bearer ${key}，每次请求轮换。</string>
+  <string name="setting_mcp_page_key_pool_hint">每行一个 key</string>
+  <string name="setting_mcp_page_key_cooldown">冷却时长（小时）</string>
+  <string name="setting_mcp_page_key_pool_status">共 %1$d 个 key，%2$d 个冷却中</string>
+  <string name="setting_mcp_page_key_pool_no_placeholder">已配置 key，但请求头中没有 ${key} 占位符</string>
+  <string name="setting_mcp_page_key_pool_url_placeholder">URL 不支持 ${key} 占位符</string>
 </resources>
