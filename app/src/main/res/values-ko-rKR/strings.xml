@@ -1392,4 +1392,16 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="assistant_page_context_message_limit_too_small">컨텍스트 메시지 제한은 %1$d보다 작을 수 없습니다. %1$d(으)로 재설정되었습니다.</string>
   <string name="skills_page_search_placeholder">스킬 검색</string>
   <string name="skills_page_search_no_result">일치하는 스킬 없음</string>
+  <string name="search_detail_key_pool_desc">Multiple keys separated by newline/space/comma. Rotated per request; switches key on quota errors.</string>
+  <string name="search_detail_key_cooldown">Cooldown (hours)</string>
+  <string name="search_detail_key_pool_status">%1$d keys in total, %2$d in cooldown</string>
+  <string name="search_detail_key_pool_recovery">, next recovery: %1$s</string>
+  <string name="search_detail_key_pool_no_keys">No keys configured</string>
+  <string name="setting_mcp_page_key_pool_title">API Key Pool</string>
+  <string name="setting_mcp_page_key_pool_desc">Multiple keys separated by newline/space/comma. Use ${key} in a header value, e.g. Authorization: Bearer ${key}. Rotated per request.</string>
+  <string name="setting_mcp_page_key_pool_hint">One key per line</string>
+  <string name="setting_mcp_page_key_cooldown">Cooldown (hours)</string>
+  <string name="setting_mcp_page_key_pool_status">%1$d keys in total, %2$d in cooldown</string>
+  <string name="setting_mcp_page_key_pool_no_placeholder">Keys are set but no header contains ${key}</string>
+  <string name="setting_mcp_page_key_pool_url_placeholder">URL does not support ${key}</string>
 </resources>

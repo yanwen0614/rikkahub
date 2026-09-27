@@ -16,7 +16,6 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -52,30 +51,34 @@ object DoubaoSearchService : SearchService<SearchServiceOptions.DoubaoOptions> {
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.DoubaoOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
-        runCatching {
-            val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
-            val body = when (serviceOptions.mode) {
-                DoubaoSearchMode.GLOBAL -> buildJsonObject {
-                    put("Query", query)
-                    put("DocCount", commonOptions.resultSize.coerceIn(1, 20))
-                    put("MaxSnippetLength", 300)
-                    put("MaxImageCountPerDoc", 1)
-                }
+        val query = params["query"]?.jsonPrimitive?.content
+            ?: return@withContext Result.failure(IllegalArgumentException("query is required"))
+        val body = when (serviceOptions.mode) {
+            DoubaoSearchMode.GLOBAL -> buildJsonObject {
+                put("Query", query)
+                put("DocCount", commonOptions.resultSize.coerceIn(1, 20))
+                put("MaxSnippetLength", 300)
+                put("MaxImageCountPerDoc", 1)
+            }
 
-                DoubaoSearchMode.CUSTOM -> buildJsonObject {
-                    put("Query", query)
-                    put("SearchType", "web")
-                    put("Count", commonOptions.resultSize.coerceIn(1, 50))
-                    put("QueryControl", buildJsonObject {
-                        put("QueryRewrite", false)
-                    })
-                }
+            DoubaoSearchMode.CUSTOM -> buildJsonObject {
+                put("Query", query)
+                put("SearchType", "web")
+                put("Count", commonOptions.resultSize.coerceIn(1, 50))
+                put("QueryControl", buildJsonObject {
+                    put("QueryRewrite", false)
+                })
             }
-            val endpoint = when (serviceOptions.mode) {
-                DoubaoSearchMode.GLOBAL -> "global_search"
-                DoubaoSearchMode.CUSTOM -> "web_search"
-            }
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+        }
+        val endpoint = when (serviceOptions.mode) {
+            DoubaoSearchMode.GLOBAL -> "global_search"
+            DoubaoSearchMode.CUSTOM -> "web_search"
+        }
+        withKeyRetry(
+            keys = serviceOptions.apiKey,
+            providerId = serviceOptions.id.toString(),
+            cooldownMillis = keyCooldownHoursToMillis(serviceOptions.keyCooldownHours),
+        ) { apiKey ->
             val request = Request.Builder()
                 .url("https://open.feedcoopapi.com/search_api/$endpoint")
                 .post(json.encodeToString(body).toRequestBody(JSON_MEDIA_TYPE))
@@ -85,7 +88,11 @@ object DoubaoSearchService : SearchService<SearchServiceOptions.DoubaoOptions> {
             httpClient.newCall(request).await().use { response ->
                 val responseBody = response.body.string()
                 if (!response.isSuccessful) {
-                    error("Doubao search failed #${response.code}: $responseBody")
+                    throw SearchHttpException(
+                        response.code,
+                        responseBody,
+                        "Doubao search failed #${response.code}: $responseBody"
+                    )
                 }
                 parseResponse(serviceOptions.mode, responseBody)
             }

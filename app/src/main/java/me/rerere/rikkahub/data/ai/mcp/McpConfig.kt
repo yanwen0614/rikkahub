@@ -12,6 +12,10 @@ data class McpCommonOptions(
     val headers: List<Pair<String, String>> = emptyList(),
     val tools: List<McpTool> = emptyList(),
     val oauth: McpOAuthState? = null,
+    // Key 池：多 key 用换行/空格/逗号分隔，请求头值中用 ${key} 占位符引用
+    val keys: String = "",
+    // key 失败冷却时长（小时），默认 24，最小 1
+    val keyCooldownHours: Int = 24,
 )
 
 /**

@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,6 +77,8 @@ fun SettingSearchDetailPage(
     val service = settings.searchServices.find { it.id == serviceId } ?: return
     val serviceIndex = settings.searchServices.indexOf(service)
     var options by remember(service) { mutableStateOf(service) }
+    // key 池状态刷新计数，进入页面与测试请求后刷新
+    var keyPoolTick by remember { mutableIntStateOf(0) }
 
     fun save(updated: SearchServiceOptions) {
         options = updated
@@ -144,7 +147,8 @@ fun SettingSearchDetailPage(
 
                         SearchServiceOptionsEditor(
                             options = options,
-                            onUpdateOptions = { save(it) }
+                            onUpdateOptions = { save(it) },
+                            keyPoolTick = keyPoolTick,
                         )
 
                         ProvideTextStyle(MaterialTheme.typography.labelMedium) {
@@ -157,7 +161,8 @@ fun SettingSearchDetailPage(
             item("test") {
                 SearchTestSection(
                     options = options,
-                    commonOptions = settings.searchCommonOptions
+                    commonOptions = settings.searchCommonOptions,
+                    onTested = { keyPoolTick++ },
                 )
             }
         }
@@ -168,26 +173,27 @@ fun SettingSearchDetailPage(
 @Composable
 private fun SearchServiceOptionsEditor(
     options: SearchServiceOptions,
-    onUpdateOptions: (SearchServiceOptions) -> Unit
+    onUpdateOptions: (SearchServiceOptions) -> Unit,
+    keyPoolTick: Int = 0,
 ) {
     when (options) {
         is SearchServiceOptions.TavilyOptions -> {
-            TavilyOptions(options) { onUpdateOptions(it) }
+            TavilyOptions(options, onUpdateOptions = { onUpdateOptions(it) }, keyPoolTick = keyPoolTick)
         }
         is SearchServiceOptions.ExaOptions -> {
-            ExaOptions(options) { onUpdateOptions(it) }
+            ExaOptions(options, onUpdateOptions = { onUpdateOptions(it) }, keyPoolTick = keyPoolTick)
         }
         is SearchServiceOptions.ZhipuOptions -> {
             ZhipuOptions(options) { onUpdateOptions(it) }
         }
         is SearchServiceOptions.DoubaoOptions -> {
-            DoubaoOptions(options) { onUpdateOptions(it) }
+            DoubaoOptions(options, onUpdateOptions = { onUpdateOptions(it) }, keyPoolTick = keyPoolTick)
         }
         is SearchServiceOptions.SearXNGOptions -> {
             SearXNGOptions(options) { onUpdateOptions(it) }
         }
         is SearchServiceOptions.LinkUpOptions -> {
-            SearchLinkUpOptions(options) { onUpdateOptions(it) }
+            SearchLinkUpOptions(options, onUpdateOptions = { onUpdateOptions(it) }, keyPoolTick = keyPoolTick)
         }
         is SearchServiceOptions.BraveOptions -> {
             BraveOptions(options) { onUpdateOptions(it) }
@@ -221,7 +227,7 @@ private fun SearchServiceOptionsEditor(
             TinyfishOptions(options) { onUpdateOptions(it) }
         }
         is SearchServiceOptions.SerperOptions -> {
-            SerperOptions(options) { onUpdateOptions(it) }
+            SerperOptions(options, onUpdateOptions = { onUpdateOptions(it) }, keyPoolTick = keyPoolTick)
         }
         is SearchServiceOptions.CustomJsOptions -> {
             CustomJsOptions(options) { onUpdateOptions(it) }
@@ -229,10 +235,85 @@ private fun SearchServiceOptionsEditor(
     }
 }
 
+// Key 池共享输入：多 key 输入 + 冷却时长 + 只读状态行
+@Composable
+private fun KeyPoolFields(
+    apiKey: String,
+    cooldownHours: Int,
+    serviceId: Uuid,
+    refreshTick: Int,
+    onApiKeyChange: (String) -> Unit,
+    onCooldownChange: (Int) -> Unit,
+) {
+    FormItem(
+        label = {
+            Text(stringResource(R.string.search_detail_api_key))
+        },
+        description = {
+            Text(stringResource(R.string.search_detail_key_pool_desc))
+        }
+    ) {
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = onApiKeyChange,
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+        )
+    }
+
+    FormItem(
+        label = {
+            Text(stringResource(R.string.search_detail_key_cooldown))
+        }
+    ) {
+        OutlinedTextField(
+            value = cooldownHours.toString(),
+            onValueChange = { v ->
+                v.toIntOrNull()?.let { onCooldownChange(it.coerceAtLeast(1)) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+        )
+    }
+
+    // 只读状态行：进入页面/测试请求后刷新，不做实时倒计时
+    @Suppress("UNUSED_EXPRESSION")
+    refreshTick.let { }
+    val snapshot = remember(apiKey, serviceId, refreshTick) {
+        runCatching { SearchService.keyPoolSnapshot(apiKey, serviceId.toString()) }.getOrNull()
+    }
+    val statusText = if (apiKey.isBlank()) {
+        stringResource(R.string.search_detail_key_pool_no_keys)
+    } else if (snapshot == null) {
+        ""
+    } else {
+        val base = stringResource(R.string.search_detail_key_pool_status, snapshot.total, snapshot.cooling)
+        val recovery = snapshot.nextRecoveryAtMillis?.let { millis ->
+            val formatted = remember(millis) {
+                java.text.DateFormat.getDateTimeInstance(
+                    java.text.DateFormat.SHORT,
+                    java.text.DateFormat.SHORT,
+                ).format(java.util.Date(millis))
+            }
+            stringResource(R.string.search_detail_key_pool_recovery, formatted)
+        } ?: ""
+        base + recovery
+    }
+    if (statusText.isNotBlank()) {
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun SearchTestSection(
     options: SearchServiceOptions,
-    commonOptions: SearchCommonOptions
+    commonOptions: SearchCommonOptions,
+    onTested: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var testing by remember { mutableStateOf(false) }
@@ -280,6 +361,7 @@ private fun SearchTestSection(
                                 )
                                 result = service.search(params, commonOptions, options)
                                 testing = false
+                                onTested()
                             }
                         }
                     },
@@ -353,21 +435,17 @@ private fun SearchTestSection(
 @Composable
 internal fun TavilyOptions(
     options: SearchServiceOptions.TavilyOptions,
-    onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
+    onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit,
+    keyPoolTick: Int = 0,
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    KeyPoolFields(
+        apiKey = options.apiKey,
+        cooldownHours = options.keyCooldownHours,
+        serviceId = options.id,
+        refreshTick = keyPoolTick,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onCooldownChange = { onUpdateOptions(options.copy(keyCooldownHours = it)) },
+    )
 
     FormItem(
         label = {
@@ -396,21 +474,17 @@ internal fun TavilyOptions(
 @Composable
 internal fun ExaOptions(
     options: SearchServiceOptions.ExaOptions,
-    onUpdateOptions: (SearchServiceOptions.ExaOptions) -> Unit
+    onUpdateOptions: (SearchServiceOptions.ExaOptions) -> Unit,
+    keyPoolTick: Int = 0,
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    KeyPoolFields(
+        apiKey = options.apiKey,
+        cooldownHours = options.keyCooldownHours,
+        serviceId = options.id,
+        refreshTick = keyPoolTick,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onCooldownChange = { onUpdateOptions(options.copy(keyCooldownHours = it)) },
+    )
 }
 
 @Composable
@@ -436,15 +510,17 @@ internal fun ZhipuOptions(
 @Composable
 internal fun DoubaoOptions(
     options: SearchServiceOptions.DoubaoOptions,
-    onUpdateOptions: (SearchServiceOptions.DoubaoOptions) -> Unit
+    onUpdateOptions: (SearchServiceOptions.DoubaoOptions) -> Unit,
+    keyPoolTick: Int = 0,
 ) {
-    FormItem(label = { Text(stringResource(R.string.search_detail_api_key)) }) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = { onUpdateOptions(options.copy(apiKey = it)) },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    KeyPoolFields(
+        apiKey = options.apiKey,
+        cooldownHours = options.keyCooldownHours,
+        serviceId = options.id,
+        refreshTick = keyPoolTick,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onCooldownChange = { onUpdateOptions(options.copy(keyCooldownHours = it)) },
+    )
 
     FormItem(label = { Text("Mode") }) {
         val modes = DoubaoSearchMode.entries
@@ -541,21 +617,17 @@ internal fun SearXNGOptions(
 @Composable
 internal fun SearchLinkUpOptions(
     options: SearchServiceOptions.LinkUpOptions,
-    onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit
+    onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit,
+    keyPoolTick: Int = 0,
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    KeyPoolFields(
+        apiKey = options.apiKey,
+        cooldownHours = options.keyCooldownHours,
+        serviceId = options.id,
+        refreshTick = keyPoolTick,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onCooldownChange = { onUpdateOptions(options.copy(keyCooldownHours = it)) },
+    )
 
     FormItem(
         label = {
@@ -604,21 +676,17 @@ internal fun BraveOptions(
 @Composable
 internal fun SerperOptions(
     options: SearchServiceOptions.SerperOptions,
-    onUpdateOptions: (SearchServiceOptions.SerperOptions) -> Unit
+    onUpdateOptions: (SearchServiceOptions.SerperOptions) -> Unit,
+    keyPoolTick: Int = 0,
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    KeyPoolFields(
+        apiKey = options.apiKey,
+        cooldownHours = options.keyCooldownHours,
+        serviceId = options.id,
+        refreshTick = keyPoolTick,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onCooldownChange = { onUpdateOptions(options.copy(keyCooldownHours = it)) },
+    )
 }
 
 @Composable

@@ -121,6 +121,8 @@ internal class McpOAuthCoordinator(
     }
 
     suspend fun needsAuthorization(config: McpServerConfig, error: Throwable): Boolean {
+        // key 池模式视为手动鉴权，直接短路，不触发 OAuth 流程
+        if (me.rerere.ai.util.splitApiKeys(config.commonOptions.keys).isNotEmpty()) return false
         if (looksUnauthorized(error) && config.commonOptions.oauth?.enabled == true) return true
         if (config.commonOptions.headers.any { it.first.equals("Authorization", ignoreCase = true) }) {
             return false

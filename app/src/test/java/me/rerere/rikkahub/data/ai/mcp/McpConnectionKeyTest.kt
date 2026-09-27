@@ -41,6 +41,42 @@ class McpConnectionKeyTest {
     }
 
     @Test
+    fun `keys and placeholder do not affect connection key`() {
+        // keys 列表变化不触发重连：选中 key 绝不纳入连接参数
+        val withKeys = base.copy(
+            commonOptions = base.commonOptions.copy(keys = "k1\nk2")
+        )
+        assertEquals(base.connectionKey(), withKeys.connectionKey())
+
+        val withCooldown = withKeys.copy(
+            commonOptions = withKeys.commonOptions.copy(keyCooldownHours = 1)
+        )
+        assertEquals(base.connectionKey(), withCooldown.connectionKey())
+
+        // 占位符字面量属于 header 值的一部分，header 变化仍触发重连
+        val withPlaceholder = base.copy(
+            commonOptions = base.commonOptions.copy(headers = listOf("Authorization" to "Bearer \${key}"))
+        )
+        assertNotEquals(base.connectionKey(), withPlaceholder.connectionKey())
+        // 但 keys 变化不影响已含占位符的 connectionKey
+        val withPlaceholderAndKeys = withPlaceholder.copy(
+            commonOptions = withPlaceholder.commonOptions.copy(keys = "k1 k2")
+        )
+        assertEquals(withPlaceholder.connectionKey(), withPlaceholderAndKeys.connectionKey())
+    }
+
+    @Test
+    fun `key pool mode skips oauth token in connection key`() {
+        val oauth = McpOAuthState(enabled = true, accessToken = "oauth-token")
+        val withOAuth = base.copy(commonOptions = base.commonOptions.copy(oauth = oauth))
+        // keys 非空视为手动鉴权，不注入 OAuth token
+        val withKeysAndOAuth = base.copy(
+            commonOptions = base.commonOptions.copy(keys = "k1", oauth = oauth)
+        )
+        assertEquals(base.connectionKey(), withKeysAndOAuth.connectionKey())
+    }
+
+    @Test
     fun `oauth token affects connection key unless manual authorization header wins`() {
         val oauth = McpOAuthState(enabled = true, accessToken = "oauth-token")
         val withOAuth = base.copy(commonOptions = base.commonOptions.copy(oauth = oauth))

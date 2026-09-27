@@ -83,6 +83,22 @@ interface SearchService<T : SearchServiceOptions> {
             keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
         }
 
+        // 注入共享 KeyRoulette 实例（app 侧与 MCP 共用同一个）
+        fun init(client: OkHttpClient, roulette: KeyRoulette) {
+            httpClient = client
+            keyRoulette = roulette
+        }
+
+        fun init(client: OkHttpClient, context: Context?, roulette: KeyRoulette?) {
+            httpClient = client
+            keyRoulette = roulette ?: if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
+        }
+
+        // key 池只读快照（供设置页状态行使用）
+        fun keyPoolSnapshot(keys: String, providerId: String): me.rerere.ai.util.KeyPoolSnapshot {
+            return keyRoulette.snapshot(keys, providerId)
+        }
+
         internal val json by lazy {
             Json {
                 ignoreUnknownKeys = true
@@ -191,6 +207,8 @@ sealed class SearchServiceOptions {
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
         val mode: DoubaoSearchMode = DoubaoSearchMode.CUSTOM,
+        // key 池冷却时长（小时），默认 24，最小 1
+        val keyCooldownHours: Int = 24,
     ) : SearchServiceOptions()
 
     @Serializable
@@ -199,6 +217,8 @@ sealed class SearchServiceOptions {
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
         val depth: String = "advanced",
+        // key 池冷却时长（小时），默认 24，最小 1
+        val keyCooldownHours: Int = 24,
     ) : SearchServiceOptions()
 
     @Serializable
@@ -206,6 +226,8 @@ sealed class SearchServiceOptions {
     data class ExaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
+        // key 池冷却时长（小时），默认 24，最小 1
+        val keyCooldownHours: Int = 24,
     ) : SearchServiceOptions()
 
     @Serializable
@@ -225,6 +247,8 @@ sealed class SearchServiceOptions {
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
         val depth: String = "standard",
+        // key 池冷却时长（小时），默认 24，最小 1
+        val keyCooldownHours: Int = 24,
     ) : SearchServiceOptions()
 
     @Serializable
@@ -311,6 +335,8 @@ sealed class SearchServiceOptions {
     data class SerperOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
+        // key 池冷却时长（小时），默认 24，最小 1
+        val keyCooldownHours: Int = 24,
     ) : SearchServiceOptions()
 
     @Serializable

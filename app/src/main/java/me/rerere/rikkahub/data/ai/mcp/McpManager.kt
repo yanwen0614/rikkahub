@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.KeyRoulette
 import me.rerere.oauth.CustomTabsOAuthAuthorizationLauncher
 import me.rerere.oauth.OAuthHttpClient
 import me.rerere.oauth.OAuthLoopbackCallbackServer
@@ -43,7 +44,9 @@ class McpManager(
     private val settingsStore: SettingsStore,
     private val appScope: AppScope,
     private val filesManager: FilesManager,
+    keyRoulette: KeyRoulette,
 ) {
+    private val keyPoolRuntime = McpKeyPoolRuntime(keyRoulette)
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.MINUTES)
@@ -85,7 +88,11 @@ class McpManager(
         httpClient = httpClient,
         oauthCoordinator = oauthCoordinator,
         statusStore = statusStore,
+        keyPoolRuntime = keyPoolRuntime,
     )
+
+    /** 供 MCP 设置页展示 key 池只读状态。 */
+    fun keyPoolSnapshot(config: McpServerConfig) = keyPoolRuntime.snapshot(config)
 
     init {
         appScope.launch {

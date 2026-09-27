@@ -99,7 +99,19 @@ val dataSourceModule = module {
         MessageFtsManager(get())
     }
 
-    single { McpManager(settingsStore = get(), appScope = get(), filesManager = get()) }
+    single<me.rerere.ai.util.KeyRoulette> {
+        val appContext: Context = get()
+        me.rerere.ai.util.KeyRoulette.lru(appContext)
+    }
+
+    single {
+        McpManager(
+            settingsStore = get(),
+            appScope = get(),
+            filesManager = get(),
+            keyRoulette = get<me.rerere.ai.util.KeyRoulette>(),
+        )
+    }
 
     single {
         GenerationLoop(
@@ -184,7 +196,12 @@ val dataSourceModule = module {
                 level = HttpLoggingInterceptor.Level.HEADERS
             })
             .build()
-        client.also { SearchService.init(it, get()) }
+        client.also {
+            // 与 MCP 共用同一个 KeyRoulette 实例
+            val appContext: Context = get()
+            val roulette: me.rerere.ai.util.KeyRoulette = get()
+            SearchService.init(it, appContext, roulette)
+        }
     }
 
     single {

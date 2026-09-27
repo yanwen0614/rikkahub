@@ -60,6 +60,18 @@ private class McpSession(initialConfig: McpServerConfig) {
     val lifecycleMutex = Mutex()
     var reconnectJob: Job? = null
     var reconnectAttempt: Int = 0
+
+    // key 池：串行化「选 key + 调用 + 失败归因」，同一服务器并发工具调用被串行化
+    val keyMutex = Mutex()
+
+    // 当前操作选中的 key，操作内所有 HTTP 请求复用，保证失败归因；
+    // 平时保留上次成功 key 供后台请求使用，绝不写入 Settings
+    @Volatile
+    var activeKey: String? = null
+
+    // 换 key 重试成功后的重连抑制窗口（epoch millis），抑制 SDK _onError 排队的退避重连
+    @Volatile
+    var suppressReconnectUntil: Long = 0L
 }
 
 private sealed interface ConnectResult {
@@ -99,6 +111,7 @@ internal class McpSessionRegistry(
     private val httpClient: HttpClient,
     private val oauthCoordinator: McpOAuthCoordinator,
     private val statusStore: McpStatusStore,
+    private val keyPoolRuntime: McpKeyPoolRuntime,
 ) {
     private val sessions = ConcurrentHashMap<Uuid, McpSession>()
 
@@ -149,20 +162,68 @@ internal class McpSessionRegistry(
             ?: throw McpClientUnavailableException("MCP client $serverId is not connected")
         val config = session.connectedConfig ?: session.config
         Log.i(TAG, "Calling tool $toolName on $serverId (${config.commonOptions.name})")
-        return try {
-            sdkClient.callTool(
-                request = CallToolRequest(
-                    params = CallToolRequestParams(name = toolName, arguments = args),
-                ),
-                options = RequestOptions(timeout = 120.seconds),
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            if (oauthCoordinator.needsAuthorization(config, e)) {
-                statusStore.update(config.id, McpStatus.NeedsAuthorization)
+        // 无 key 池：保持原有单次调用路径
+        if (!keyPoolRuntime.hasKeyPool(config)) {
+            return try {
+                sdkClient.callTool(
+                    request = CallToolRequest(
+                        params = CallToolRequestParams(name = toolName, arguments = args),
+                    ),
+                    options = RequestOptions(timeout = 120.seconds),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (oauthCoordinator.needsAuthorization(config, e)) {
+                    statusStore.update(config.id, McpStatus.NeedsAuthorization)
+                }
+                throw e
             }
-            throw e
+        }
+        // key 池：每次操作轮换选 key，失败换 key 重试，串行化保证失败归因
+        return session.keyMutex.withLock {
+            val attempted = mutableSetOf<String>()
+            var lastError: Exception? = null
+            repeat(MCP_KEY_MAX_ATTEMPTS) {
+                val key = keyPoolRuntime.selectKey(config, attempted)
+                    ?: run {
+                        lastError?.let { throw it }
+                        throw McpClientUnavailableException("All API keys are cooling down, please try later")
+                    }
+                attempted.add(key)
+                session.activeKey = key
+                try {
+                    val result = sdkClient.callTool(
+                        request = CallToolRequest(
+                            params = CallToolRequestParams(name = toolName, arguments = args),
+                        ),
+                        options = RequestOptions(timeout = 120.seconds),
+                    )
+                    keyPoolRuntime.reportSuccess(config, key)
+                    // 换 key 重试成功后抑制 SDK _onError 排队的退避重连
+                    if (attempted.size > 1) {
+                        session.suppressReconnectUntil = System.currentTimeMillis() + 5000L
+                        session.reconnectJob?.cancel()
+                        session.reconnectJob = null
+                        session.reconnectAttempt = 0
+                    }
+                    return@withLock result
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (isMcpKeyFailure(e)) {
+                        keyPoolRuntime.reportFailure(config, key)
+                        lastError = e
+                        // 继续换 key 重试
+                    } else {
+                        if (oauthCoordinator.needsAuthorization(config, e)) {
+                            statusStore.update(config.id, McpStatus.NeedsAuthorization)
+                        }
+                        throw e
+                    }
+                }
+            }
+            throw lastError ?: McpClientUnavailableException("All API keys are cooling down, please try later")
         }
     }
 
@@ -232,41 +293,110 @@ internal class McpSessionRegistry(
             session.connectedConfig = null
             oldClient?.let { closeClient(it, config.commonOptions.name) }
 
-            val sdkClient = createSdkClient(config)
-            val transport = createTransport(config)
-            installTransportCallbacks(config, sdkClient, transport)
+            // 无 key 池：原有单次建连路径
+            if (!keyPoolRuntime.hasKeyPool(config)) {
+                session.activeKey = null
+                val sdkClient = createSdkClient(config)
+                val transport = createTransport(config, session)
+                installTransportCallbacks(config, sdkClient, transport)
 
-            try {
-                sdkClient.connect(transport)
-                val syncedConfig = syncTools(session, sdkClient, config)
-                if (sessions[config.id] !== session ||
-                    !hasSameConnectionParameters(config, syncedConfig)
-                ) {
+                try {
+                    sdkClient.connect(transport)
+                    val syncedConfig = syncTools(session, sdkClient, config)
+                    if (sessions[config.id] !== session ||
+                        !hasSameConnectionParameters(config, syncedConfig)
+                    ) {
+                        closeClient(sdkClient, config.commonOptions.name)
+                        return@withLock ConnectResult.Stale
+                    }
+
+                    session.config = syncedConfig
+                    session.connectedConfig = syncedConfig
+                    session.client = sdkClient
+                    session.reconnectAttempt = 0
+                    statusStore.update(config.id, McpStatus.Connected)
+                    Log.i(TAG, "Connected MCP server ${config.id} (${config.commonOptions.name})")
+                    return@withLock ConnectResult.Success
+                } catch (e: CancellationException) {
                     closeClient(sdkClient, config.commonOptions.name)
-                    return@withLock ConnectResult.Stale
-                }
-
-                session.config = syncedConfig
-                session.connectedConfig = syncedConfig
-                session.client = sdkClient
-                session.reconnectAttempt = 0
-                statusStore.update(config.id, McpStatus.Connected)
-                Log.i(TAG, "Connected MCP server ${config.id} (${config.commonOptions.name})")
-                ConnectResult.Success
-            } catch (e: CancellationException) {
-                closeClient(sdkClient, config.commonOptions.name)
-                throw e
-            } catch (e: Exception) {
-                closeClient(sdkClient, config.commonOptions.name)
-                Log.e(TAG, "Failed to connect MCP server ${config.id}", e)
-                if (oauthCoordinator.needsAuthorization(config, e)) {
-                    statusStore.update(config.id, McpStatus.NeedsAuthorization)
-                    ConnectResult.NeedsAuthorization
-                } else {
-                    statusStore.update(config.id, McpStatus.Error.from(e))
-                    ConnectResult.Failed
+                    throw e
+                } catch (e: Exception) {
+                    closeClient(sdkClient, config.commonOptions.name)
+                    Log.e(TAG, "Failed to connect MCP server ${config.id}", e)
+                    if (oauthCoordinator.needsAuthorization(config, e)) {
+                        statusStore.update(config.id, McpStatus.NeedsAuthorization)
+                        return@withLock ConnectResult.NeedsAuthorization
+                    } else {
+                        statusStore.update(config.id, McpStatus.Error.from(e))
+                        return@withLock ConnectResult.Failed
+                    }
                 }
             }
+
+            // key 池：每次建连轮换选 key，失败换 key 重试（限次，避免与退避重连叠加）
+            val attemptedKeys = mutableSetOf<String>()
+            var lastKeyError: Exception? = null
+            repeat(MCP_KEY_MAX_ATTEMPTS) {
+                val key = keyPoolRuntime.selectKey(config, attemptedKeys)
+                    ?: run {
+                        lastKeyError?.let { e ->
+                            Log.e(TAG, "Failed to connect MCP server ${config.id} (all keys cooling)", e)
+                            statusStore.update(config.id, McpStatus.Error.from(e))
+                        } ?: statusStore.update(
+                            config.id,
+                            McpStatus.Error("All API keys are cooling down, please try later")
+                        )
+                        return@withLock ConnectResult.Failed
+                    }
+                attemptedKeys.add(key)
+                session.activeKey = key
+                val sdkClient = createSdkClient(config)
+                val transport = createTransport(config, session)
+                installTransportCallbacks(config, sdkClient, transport)
+                try {
+                    sdkClient.connect(transport)
+                    val syncedConfig = syncTools(session, sdkClient, config)
+                    if (sessions[config.id] !== session ||
+                        !hasSameConnectionParameters(config, syncedConfig)
+                    ) {
+                        closeClient(sdkClient, config.commonOptions.name)
+                        return@withLock ConnectResult.Stale
+                    }
+                    keyPoolRuntime.reportSuccess(config, key)
+                    session.config = syncedConfig
+                    session.connectedConfig = syncedConfig
+                    session.client = sdkClient
+                    session.reconnectAttempt = 0
+                    statusStore.update(config.id, McpStatus.Connected)
+                    Log.i(TAG, "Connected MCP server ${config.id} (${config.commonOptions.name})")
+                    return@withLock ConnectResult.Success
+                } catch (e: CancellationException) {
+                    closeClient(sdkClient, config.commonOptions.name)
+                    throw e
+                } catch (e: Exception) {
+                    closeClient(sdkClient, config.commonOptions.name)
+                    if (isMcpKeyFailure(e)) {
+                        keyPoolRuntime.reportFailure(config, key)
+                        lastKeyError = e
+                        Log.w(TAG, "MCP connect key failed, retry with next key (${config.id})", e)
+                        // 继续换 key 重试
+                    } else {
+                        Log.e(TAG, "Failed to connect MCP server ${config.id}", e)
+                        if (oauthCoordinator.needsAuthorization(config, e)) {
+                            statusStore.update(config.id, McpStatus.NeedsAuthorization)
+                            return@withLock ConnectResult.NeedsAuthorization
+                        } else {
+                            statusStore.update(config.id, McpStatus.Error.from(e))
+                            return@withLock ConnectResult.Failed
+                        }
+                    }
+                }
+            }
+            lastKeyError?.let {
+                Log.e(TAG, "Failed to connect MCP server ${config.id} (keys exhausted)", it)
+                statusStore.update(config.id, McpStatus.Error.from(it))
+            }
+            ConnectResult.Failed
         }
     }
 
@@ -351,7 +481,10 @@ internal class McpSessionRegistry(
     ) {
         appScope.launch {
             val session = sessions[configId] ?: return@launch
+            // 换 key 重试成功后的抑制窗口：忽略 SDK _onError 排队的退避重连
+            if (System.currentTimeMillis() < session.suppressReconnectUntil) return@launch
             session.lifecycleMutex.withLock {
+                if (System.currentTimeMillis() < session.suppressReconnectUntil) return@withLock
                 if (sessions[configId] !== session) return@withLock
                 if (sourceClient != null && session.client !== sourceClient) return@withLock
                 if (!retryAfterFailure && statusStore.status.value[configId] != McpStatus.Connected) {
@@ -429,23 +562,26 @@ internal class McpSessionRegistry(
         clientInfo = Implementation(name = config.commonOptions.name, version = "1.0")
     )
 
-    private fun createTransport(config: McpServerConfig): AbstractTransport = when (config) {
+    // 请求时向 runtime 读取当前 key 并解析占位符；
+    // connectionKey 仍使用原始 header 值（含 ${key} 字面量），选中 key 绝不纳入连接参数
+    private fun createTransport(config: McpServerConfig, session: McpSession): AbstractTransport = when (config) {
         is McpServerConfig.SseTransportServer -> SseClientTransport(
             urlString = config.url,
             client = httpClient,
-            requestBuilder = { appendResolvedHeaders(config) },
+            requestBuilder = { appendResolvedHeaders(config, session.activeKey) },
         )
 
         is McpServerConfig.StreamableHTTPServer -> StreamableHttpClientTransport(
             url = config.url,
             client = httpClient,
-            requestBuilder = { appendResolvedHeaders(config) },
+            requestBuilder = { appendResolvedHeaders(config, session.activeKey) },
         )
     }
 
-    private fun HttpRequestBuilder.appendResolvedHeaders(config: McpServerConfig) {
+    private fun HttpRequestBuilder.appendResolvedHeaders(config: McpServerConfig, activeKey: String?) {
+        val resolved = keyPoolRuntime.resolveHeaders(config, activeKey)
         headers.appendAll(StringValues.build {
-            config.resolvedHeaders().forEach { (name, value) -> append(name, value) }
+            resolved.forEach { (name, value) -> append(name, value) }
         })
     }
 
@@ -488,6 +624,8 @@ private fun hasSameConnectionParameters(
 private fun McpServerConfig.resolvedHeaders(): List<Pair<String, String>> {
     // 设置页“添加请求头”后未填写会留下空名称，OkHttp 会直接抛出 "name is empty"
     val base = commonOptions.headers.filter { it.first.isNotBlank() }
+    // key 池模式视为手动鉴权，不注入 OAuth token；返回原始值（含 ${key} 字面量）
+    if (me.rerere.ai.util.splitApiKeys(commonOptions.keys).isNotEmpty()) return base
     val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
     val hasAuthorization = base.any { it.first.equals("Authorization", ignoreCase = true) }
     return if (!token.isNullOrBlank() && !hasAuthorization) {
