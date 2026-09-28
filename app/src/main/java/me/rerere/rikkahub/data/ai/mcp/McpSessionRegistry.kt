@@ -622,7 +622,8 @@ private fun hasSameConnectionParameters(
 ): Boolean = left != null && right != null && left.connectionKey() == right.connectionKey()
 
 private fun McpServerConfig.resolvedHeaders(): List<Pair<String, String>> {
-    val base = commonOptions.headers
+    // 设置页“添加请求头”后未填写会留下空名称，OkHttp 会直接抛出 "name is empty"
+    val base = commonOptions.headers.filter { it.first.isNotBlank() }
     // key 池模式视为手动鉴权，不注入 OAuth token；返回原始值（含 ${key} 字面量）
     if (me.rerere.ai.util.splitApiKeys(commonOptions.keys).isNotEmpty()) return base
     val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
