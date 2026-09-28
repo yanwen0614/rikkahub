@@ -115,6 +115,8 @@ internal class McpSessionRegistry(
 ) {
     private val sessions = ConcurrentHashMap<Uuid, McpSession>()
 
+    private fun poolsOf(): List<McpKeyPool> = settingsStore.settingsFlow.value.mcpKeyPools
+
     fun getClient(configId: Uuid): Client? = sessions[configId]?.client
 
     fun getStatus(configId: Uuid): Flow<McpStatus> = statusStore.get(configId)
@@ -163,7 +165,7 @@ internal class McpSessionRegistry(
         val config = session.connectedConfig ?: session.config
         Log.i(TAG, "Calling tool $toolName on $serverId (${config.commonOptions.name})")
         // 无 key 池：保持原有单次调用路径
-        if (!keyPoolRuntime.hasKeyPool(config)) {
+        if (!keyPoolRuntime.hasKeyPool(config, poolsOf())) {
             return try {
                 sdkClient.callTool(
                     request = CallToolRequest(
@@ -174,7 +176,7 @@ internal class McpSessionRegistry(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (oauthCoordinator.needsAuthorization(config, e)) {
+                if (oauthCoordinator.needsAuthorization(config, e, poolsOf())) {
                     statusStore.update(config.id, McpStatus.NeedsAuthorization)
                 }
                 throw e
@@ -185,7 +187,7 @@ internal class McpSessionRegistry(
             val attempted = mutableSetOf<String>()
             var lastError: Exception? = null
             repeat(MCP_KEY_MAX_ATTEMPTS) {
-                val key = keyPoolRuntime.selectKey(config, attempted)
+                val key = keyPoolRuntime.selectKey(config, attempted, poolsOf())
                     ?: run {
                         lastError?.let { throw it }
                         throw McpClientUnavailableException("All API keys are cooling down, please try later")
@@ -199,7 +201,7 @@ internal class McpSessionRegistry(
                         ),
                         options = RequestOptions(timeout = 120.seconds),
                     )
-                    keyPoolRuntime.reportSuccess(config, key)
+                    keyPoolRuntime.reportSuccess(config, key, poolsOf())
                     // 换 key 重试成功后抑制 SDK _onError 排队的退避重连
                     if (attempted.size > 1) {
                         session.suppressReconnectUntil = System.currentTimeMillis() + 5000L
@@ -212,11 +214,11 @@ internal class McpSessionRegistry(
                     throw e
                 } catch (e: Exception) {
                     if (isMcpKeyFailure(e)) {
-                        keyPoolRuntime.reportFailure(config, key)
+                        keyPoolRuntime.reportFailure(config, key, poolsOf())
                         lastError = e
                         // 继续换 key 重试
                     } else {
-                        if (oauthCoordinator.needsAuthorization(config, e)) {
+                        if (oauthCoordinator.needsAuthorization(config, e, poolsOf())) {
                             statusStore.update(config.id, McpStatus.NeedsAuthorization)
                         }
                         throw e
@@ -294,7 +296,7 @@ internal class McpSessionRegistry(
             oldClient?.let { closeClient(it, config.commonOptions.name) }
 
             // 无 key 池：原有单次建连路径
-            if (!keyPoolRuntime.hasKeyPool(config)) {
+            if (!keyPoolRuntime.hasKeyPool(config, poolsOf())) {
                 session.activeKey = null
                 val sdkClient = createSdkClient(config)
                 val transport = createTransport(config, session)
@@ -323,7 +325,7 @@ internal class McpSessionRegistry(
                 } catch (e: Exception) {
                     closeClient(sdkClient, config.commonOptions.name)
                     Log.e(TAG, "Failed to connect MCP server ${config.id}", e)
-                    if (oauthCoordinator.needsAuthorization(config, e)) {
+                    if (oauthCoordinator.needsAuthorization(config, e, poolsOf())) {
                         statusStore.update(config.id, McpStatus.NeedsAuthorization)
                         return@withLock ConnectResult.NeedsAuthorization
                     } else {
@@ -337,7 +339,7 @@ internal class McpSessionRegistry(
             val attemptedKeys = mutableSetOf<String>()
             var lastKeyError: Exception? = null
             repeat(MCP_KEY_MAX_ATTEMPTS) {
-                val key = keyPoolRuntime.selectKey(config, attemptedKeys)
+                val key = keyPoolRuntime.selectKey(config, attemptedKeys, poolsOf())
                     ?: run {
                         lastKeyError?.let { e ->
                             Log.e(TAG, "Failed to connect MCP server ${config.id} (all keys cooling)", e)
@@ -362,7 +364,7 @@ internal class McpSessionRegistry(
                         closeClient(sdkClient, config.commonOptions.name)
                         return@withLock ConnectResult.Stale
                     }
-                    keyPoolRuntime.reportSuccess(config, key)
+                    keyPoolRuntime.reportSuccess(config, key, poolsOf())
                     session.config = syncedConfig
                     session.connectedConfig = syncedConfig
                     session.client = sdkClient
@@ -376,13 +378,13 @@ internal class McpSessionRegistry(
                 } catch (e: Exception) {
                     closeClient(sdkClient, config.commonOptions.name)
                     if (isMcpKeyFailure(e)) {
-                        keyPoolRuntime.reportFailure(config, key)
+                        keyPoolRuntime.reportFailure(config, key, poolsOf())
                         lastKeyError = e
                         Log.w(TAG, "MCP connect key failed, retry with next key (${config.id})", e)
                         // 继续换 key 重试
                     } else {
                         Log.e(TAG, "Failed to connect MCP server ${config.id}", e)
-                        if (oauthCoordinator.needsAuthorization(config, e)) {
+                        if (oauthCoordinator.needsAuthorization(config, e, poolsOf())) {
                             statusStore.update(config.id, McpStatus.NeedsAuthorization)
                             return@withLock ConnectResult.NeedsAuthorization
                         } else {
@@ -425,7 +427,7 @@ internal class McpSessionRegistry(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    if (oauthCoordinator.needsAuthorization(config, e)) {
+                    if (oauthCoordinator.needsAuthorization(config, e, poolsOf())) {
                         statusStore.update(config.id, McpStatus.NeedsAuthorization)
                     } else {
                         statusStore.update(config.id, McpStatus.Error.from(e))
@@ -604,6 +606,7 @@ internal data class McpConnectionKey(
     val serverUrl: String,
     val clientName: String,
     val headers: List<Pair<String, String>>,
+    val keyPoolId: String?,
 )
 
 internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKey(
@@ -614,6 +617,7 @@ internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKe
     serverUrl = serverUrl,
     clientName = commonOptions.name,
     headers = resolvedHeaders(),
+    keyPoolId = commonOptions.keyPoolId?.toString(),
 )
 
 private fun hasSameConnectionParameters(
@@ -625,6 +629,8 @@ private fun McpServerConfig.resolvedHeaders(): List<Pair<String, String>> {
     // 设置页“添加请求头”后未填写会留下空名称，OkHttp 会直接抛出 "name is empty"
     val base = commonOptions.headers.filter { it.first.isNotBlank() }
     // key 池模式视为手动鉴权，不注入 OAuth token；返回原始值（含 ${key} 字面量）
+    // 共享池引用时同样视为手动鉴权（无需 pools 内容即可判断）
+    if (commonOptions.keyPoolId != null) return base
     if (me.rerere.ai.util.splitApiKeys(commonOptions.keys).isNotEmpty()) return base
     val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
     val hasAuthorization = base.any { it.first.equals("Authorization", ignoreCase = true) }

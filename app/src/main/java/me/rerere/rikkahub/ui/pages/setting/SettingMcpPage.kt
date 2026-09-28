@@ -87,17 +87,20 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.Key01
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.MessageBlocked
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.mcp.McpTool
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ItemAction
 import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
@@ -139,6 +142,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             ))
     }
     var showImportDialog by remember { mutableStateOf(false) }
+    val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         topBar = {
@@ -150,6 +154,14 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 actions = {
+                    // 顺序固定：[池] [导入] [+]
+                    IconButton(
+                        onClick = {
+                            navController.navigate(Screen.SettingMcpKeyPool)
+                        }
+                    ) {
+                        Icon(HugeIcons.Key01, null)
+                    }
                     IconButton(
                         onClick = {
                             showImportDialog = true
@@ -846,6 +858,10 @@ private fun McpKeyPoolConfigure(
     config: McpServerConfig,
     update: (McpServerConfig) -> Unit,
 ) {
+    val settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore = koinInject()
+    val allSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val poolList = allSettings.mcpKeyPools
+    val selectedPool = poolList.find { it.id == config.commonOptions.keyPoolId }
     fun updateCommon(transform: (McpCommonOptions) -> McpCommonOptions) {
         val next = transform(config.commonOptions)
         update(
@@ -865,6 +881,34 @@ private fun McpKeyPoolConfigure(
         }
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 共享池选择：有池时才展示；选中后内联输入置灰
+            if (poolList.isNotEmpty()) {
+                var poolMenu by remember { mutableStateOf(false) }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { updateCommon { it.copy(keyPoolId = null) } },
+                        modifier = Modifier.weight(1f)
+                    ) { Text(if (selectedPool == null) "● 内联 Key" else "内联 Key") }
+                    Button(
+                        onClick = { poolMenu = true },
+                        modifier = Modifier.weight(1f)
+                    ) { Text(selectedPool?.let { "● ${it.name.ifBlank { "未命名池" }}" } ?: "共享池") }
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = poolMenu,
+                        onDismissRequest = { poolMenu = false }
+                    ) {
+                        poolList.forEach { pool ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(pool.name.ifBlank { "未命名池" }) },
+                                onClick = {
+                                    updateCommon { it.copy(keyPoolId = pool.id) }
+                                    poolMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
             var keysVisible by rememberSaveable { mutableStateOf(false) }
             OutlinedTextField(
                 value = config.commonOptions.keys,
@@ -872,6 +916,7 @@ private fun McpKeyPoolConfigure(
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text(stringResource(R.string.setting_mcp_page_key_pool_hint)) },
                 minLines = 2,
+                enabled = selectedPool == null,
                 visualTransformation = if (keysVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { keysVisible = !keysVisible }) {
@@ -883,21 +928,28 @@ private fun McpKeyPoolConfigure(
                 }
             )
             OutlinedTextField(
-                value = config.commonOptions.keyCooldownHours.toString(),
+                value = (selectedPool?.keyCooldownHours ?: config.commonOptions.keyCooldownHours).toString(),
                 onValueChange = { v ->
-                    v.toIntOrNull()?.let { hours -> updateCommon { it.copy(keyCooldownHours = hours.coerceAtLeast(1)) } }
+                    v.toIntOrNull()?.let { hours ->
+                        if (selectedPool == null) updateCommon { it.copy(keyCooldownHours = hours.coerceAtLeast(1)) }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.setting_mcp_page_key_cooldown)) },
                 singleLine = true,
+                enabled = selectedPool == null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
+            if (selectedPool != null) {
+                Text("使用共享池「${selectedPool.name.ifBlank { "未命名池" }}」，去钥匙页面改 Key 对这里所有引用生效", style = MaterialTheme.typography.bodySmall)
+            }
             // 校验提示：keys 非空但无占位符、URL 含占位符（不支持）
             val serverUrl = when (config) {
                 is McpServerConfig.SseTransportServer -> config.url
                 is McpServerConfig.StreamableHTTPServer -> config.url
             }
-            if (config.commonOptions.keys.isNotBlank() &&
+            val effectiveKeys = selectedPool?.keys ?: config.commonOptions.keys
+            if (effectiveKeys.isNotBlank() &&
                 config.commonOptions.headers.none { it.second.contains("\${key}") }
             ) {
                 Text(
@@ -915,10 +967,10 @@ private fun McpKeyPoolConfigure(
             }
             // 只读状态行：共 N 个 key、M 个冷却中
             val mcpManager = koinInject<McpManager>()
-            val snapshot = remember(config.commonOptions.keys, config.id) {
-                runCatching { mcpManager.keyPoolSnapshot(config) }.getOrNull()
+            val snapshot = remember(effectiveKeys, config.commonOptions.keyPoolId, config.id) {
+                runCatching { mcpManager.keyPoolSnapshot(config, poolList) }.getOrNull()
             }
-            if (config.commonOptions.keys.isNotBlank() && snapshot != null) {
+            if (effectiveKeys.isNotBlank() && snapshot != null) {
                 Text(
                     text = stringResource(
                         R.string.setting_mcp_page_key_pool_status,

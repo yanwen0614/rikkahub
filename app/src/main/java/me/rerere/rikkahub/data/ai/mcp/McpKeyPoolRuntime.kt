@@ -64,9 +64,31 @@ fun mcpCooldownMillis(hours: Int): Long {
 class McpKeyPoolRuntime(
     private val roulette: KeyRoulette,
 ) {
+    /** 解析共享池引用，找不到或为空时返回 null（回退内联）。 */
+    fun effectivePool(config: McpServerConfig, pools: List<McpKeyPool>): McpKeyPool? {
+        val id = config.commonOptions.keyPoolId ?: return null
+        return pools.find { it.id == id }
+    }
+
+    /** 有效 Key 字符串：共享池优先，否则内联 keys。 */
+    fun effectiveKeys(config: McpServerConfig, pools: List<McpKeyPool>): String {
+        return effectivePool(config, pools)?.keys ?: config.commonOptions.keys
+    }
+
+    /** 有效冷却小时数：共享池优先，否则内联。 */
+    fun effectiveCooldownHours(config: McpServerConfig, pools: List<McpKeyPool>): Int {
+        return effectivePool(config, pools)?.keyCooldownHours ?: config.commonOptions.keyCooldownHours
+    }
+
+    /** 有效桶 ID：共享池多 Server 共用一桶，否则按 Server 隔离。 */
+    fun effectiveProviderId(config: McpServerConfig, pools: List<McpKeyPool>): String {
+        val pool = effectivePool(config, pools)
+        return if (pool != null) "mcp-pool-${pool.id}" else config.id.toString()
+    }
+
     /** 该服务器是否启用 key 池。 */
-    fun hasKeyPool(config: McpServerConfig): Boolean {
-        return splitApiKeys(config.commonOptions.keys).isNotEmpty()
+    fun hasKeyPool(config: McpServerConfig, pools: List<McpKeyPool> = emptyList()): Boolean {
+        return splitApiKeys(effectiveKeys(config, pools)).isNotEmpty()
     }
 
     /** 请求头中是否有 ${key} 占位符。 */
@@ -80,10 +102,14 @@ class McpKeyPoolRuntime(
     }
 
     /** 为单次操作选择一个 key，无可用返回 null（全部冷却时直接失败）。 */
-    fun selectKey(config: McpServerConfig, excluded: Set<String> = emptySet()): String? {
-        val keys = config.commonOptions.keys
+    fun selectKey(
+        config: McpServerConfig,
+        excluded: Set<String> = emptySet(),
+        pools: List<McpKeyPool> = emptyList(),
+    ): String? {
+        val keys = effectiveKeys(config, pools)
         if (splitApiKeys(keys).isEmpty()) return null
-        return roulette.nextExcluding(keys, config.id.toString(), excluded)
+        return roulette.nextExcluding(keys, effectiveProviderId(config, pools), excluded)
     }
 
     /** 用指定 key 解析请求头占位符，无 key 时返回原始值。 */
@@ -102,17 +128,17 @@ class McpKeyPoolRuntime(
         }
     }
 
-    fun reportFailure(config: McpServerConfig, key: String) {
-        roulette.reportFailure(key, config.id.toString(), mcpCooldownMillis(config.commonOptions.keyCooldownHours))
+    fun reportFailure(config: McpServerConfig, key: String, pools: List<McpKeyPool> = emptyList()) {
+        roulette.reportFailure(key, effectiveProviderId(config, pools), mcpCooldownMillis(effectiveCooldownHours(config, pools)))
     }
 
-    fun reportSuccess(config: McpServerConfig, key: String) {
-        roulette.reportSuccess(key, config.id.toString())
+    fun reportSuccess(config: McpServerConfig, key: String, pools: List<McpKeyPool> = emptyList()) {
+        roulette.reportSuccess(key, effectiveProviderId(config, pools))
     }
 
-    fun snapshot(config: McpServerConfig) = roulette.snapshot(
-        config.commonOptions.keys,
-        config.id.toString(),
+    fun snapshot(config: McpServerConfig, pools: List<McpKeyPool> = emptyList()) = roulette.snapshot(
+        effectiveKeys(config, pools),
+        effectiveProviderId(config, pools),
     )
 
     fun providerId(serverId: Uuid): String = serverId.toString()
@@ -123,11 +149,13 @@ class McpKeyPoolRuntime(
  * 不注入 OAuth token（与 needsAuthorization 短路保持一致）。
  * 注意：返回的仍是原始值（含 ${key} 字面量），绝不把选中的 key 纳入连接参数。
  */
-internal fun McpServerConfig.resolvedHeadersForKeyPool(): List<Pair<String, String>> {
+internal fun McpServerConfig.resolvedHeadersForKeyPool(pools: List<McpKeyPool> = emptyList()): List<Pair<String, String>> {
     // 空名称请求头直接过滤（与 resolvedHeaders 的上游修复保持一致，避免 OkHttp "name is empty"）
     val base = commonOptions.headers.filter { it.first.isNotBlank() }
     // key 池模式下视为手动鉴权，不注入 OAuth token
-    if (splitApiKeys(commonOptions.keys).isNotEmpty()) return base
+    // 共享池引用时同样短路（即使 pools 未传入也按手动鉴权处理，避免误注 token）
+    if (commonOptions.keyPoolId != null) return base
+    if (splitApiKeys(McpKeyPoolRuntime(KeyRoulette.default()).effectiveKeys(this, pools)).isNotEmpty()) return base
     val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
     val hasAuthorization = base.any { it.first.equals("Authorization", ignoreCase = true) }
     return if (!token.isNullOrBlank() && !hasAuthorization) {

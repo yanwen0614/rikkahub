@@ -115,4 +115,31 @@ class McpKeyPoolRuntimeTest {
         assertEquals(24L * 3600_000L, mcpCooldownMillis(24))
         assertEquals(1L * 3600_000L, mcpCooldownMillis(0))
     }
+
+    @Test
+    fun `同一共享池多Server共用轮询与冷却`() {
+        val r = runtime()
+        val pool = McpKeyPool(name = "shared", keys = "k1 k2")
+        val pools = listOf(pool)
+        val a = config().copy(commonOptions = config().commonOptions.copy(keyPoolId = pool.id))
+        val b = config().copy(commonOptions = config().commonOptions.copy(keyPoolId = pool.id))
+        assertTrue(r.hasKeyPool(a, pools))
+        val first = r.selectKey(a, pools = pools)
+        assertTrue(first == "k1" || first == "k2")
+        r.reportFailure(a, first!!, pools)
+        assertEquals(1, r.snapshot(a, pools).cooling)
+        assertEquals(1, r.snapshot(b, pools).cooling)
+        assertEquals(if (first == "k1") "k2" else "k1", r.selectKey(b, pools = pools))
+    }
+
+    @Test
+    fun `共享池引用缺失时回退内联`() {
+        val r = runtime()
+        // 池找不到时回退到内联 keys，不丢配置
+        val inline = config(keys = "k1 k2").copy(
+            commonOptions = config(keys = "k1 k2").commonOptions.copy(keyPoolId = kotlin.uuid.Uuid.random())
+        )
+        assertTrue(r.hasKeyPool(inline, emptyList()))
+        assertEquals(2, r.snapshot(inline, emptyList()).total)
+    }
 }
