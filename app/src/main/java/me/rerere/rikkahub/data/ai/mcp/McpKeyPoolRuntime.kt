@@ -124,7 +124,8 @@ class McpKeyPoolRuntime(
  * 注意：返回的仍是原始值（含 ${key} 字面量），绝不把选中的 key 纳入连接参数。
  */
 internal fun McpServerConfig.resolvedHeadersForKeyPool(): List<Pair<String, String>> {
-    val base = commonOptions.headers
+    // 空名称请求头直接过滤（与 resolvedHeaders 的上游修复保持一致，避免 OkHttp "name is empty"）
+    val base = commonOptions.headers.filter { it.first.isNotBlank() }
     // key 池模式下视为手动鉴权，不注入 OAuth token
     if (splitApiKeys(commonOptions.keys).isNotEmpty()) return base
     val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
