@@ -881,32 +881,47 @@ private fun McpKeyPoolConfigure(
         }
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 共享池选择：有池时才展示；选中后内联输入置灰
+            // 共享池选择：分段切换 + 标准下拉框（锚定输入框，避免菜单飘移）
             if (poolList.isNotEmpty()) {
-                var poolMenu by remember { mutableStateOf(false) }
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = { updateCommon { it.copy(keyPoolId = null) } },
-                        modifier = Modifier.weight(1f)
-                    ) { Text(if (selectedPool == null) "● 内联 Key" else "内联 Key") }
-                    Button(
-                        onClick = { poolMenu = true },
-                        modifier = Modifier.weight(1f)
-                    ) { Text(selectedPool?.let { "● ${it.name.ifBlank { "未命名池" }}" } ?: "共享池") }
-                    androidx.compose.material3.DropdownMenu(
-                        expanded = poolMenu,
-                        onDismissRequest = { poolMenu = false }
-                    ) {
-                        poolList.forEach { pool ->
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(pool.name.ifBlank { "未命名池" }) },
-                                onClick = {
-                                    updateCommon { it.copy(keyPoolId = pool.id) }
-                                    poolMenu = false
+                var useShared by remember(config.commonOptions.keyPoolId) {
+                    mutableStateOf(config.commonOptions.keyPoolId != null)
+                }
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !useShared,
+                        onClick = {
+                            useShared = false
+                            updateCommon { it.copy(keyPoolId = null) }
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(0, 2),
+                        label = { Text("内联 Key") }
+                    )
+                    SegmentedButton(
+                        selected = useShared,
+                        onClick = {
+                            useShared = true
+                            if (selectedPool == null) {
+                                poolList.firstOrNull()?.let { first ->
+                                    updateCommon { it.copy(keyPoolId = first.id) }
                                 }
-                            )
-                        }
-                    }
+                            }
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(1, 2),
+                        label = { Text("共享池") }
+                    )
+                }
+                if (useShared) {
+                    me.rerere.rikkahub.ui.components.ui.SelectTextField(
+                        value = selectedPool?.name?.ifBlank { "未命名池" } ?: "选择共享池",
+                        options = poolList,
+                        onOptionSelected = { pool ->
+                            updateCommon { it.copy(keyPoolId = pool.id) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        readOnly = true,
+                        placeholder = { Text("选择共享池") },
+                        optionToString = { it.name.ifBlank { "未命名池" } },
+                    )
                 }
             }
             var keysVisible by rememberSaveable { mutableStateOf(false) }
