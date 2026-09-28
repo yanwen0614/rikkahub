@@ -1404,4 +1404,12 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="setting_mcp_page_key_pool_status">%1$d keys in total, %2$d in cooldown</string>
   <string name="setting_mcp_page_key_pool_no_placeholder">Keys are set but no header contains ${key}</string>
   <string name="setting_mcp_page_key_pool_url_placeholder">URL does not support ${key}</string>
+  <string name="assistant_page_local_tools_chart_display_title">チャート表示</string>
+  <string name="assistant_page_local_tools_chart_display_desc">AIに折れ線グラフ、棒グラフ、散布図を表示させる</string>
+  <string name="chat_message_tool_chart_display">グラフを表示</string>
+  <string name="chat_message_tool_chart_display_with_title">グラフを表示: %1$s</string>
+  <string name="chart_mode_chart">チャート</string>
+  <string name="chart_mode_table">表</string>
+  <string name="chart_series">系列</string>
+  <string name="chart_series_name">系列 %1$d</string>
 </resources>
