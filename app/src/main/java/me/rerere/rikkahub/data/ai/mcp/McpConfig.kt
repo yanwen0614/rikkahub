@@ -16,6 +16,16 @@ data class McpCommonOptions(
     val keys: String = "",
     // key 失败冷却时长（小时），默认 24，最小 1
     val keyCooldownHours: Int = 24,
+    // 共享池引用：非空时忽略内联 keys/冷却，走对应池
+    val keyPoolId: Uuid? = null,
+)
+
+@Serializable
+data class McpKeyPool(
+    val id: Uuid = Uuid.random(),
+    val name: String = "",
+    val keys: String = "",
+    val keyCooldownHours: Int = 24,
 )
 
 /**

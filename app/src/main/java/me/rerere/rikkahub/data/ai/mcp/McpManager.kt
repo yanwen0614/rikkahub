@@ -92,7 +92,8 @@ class McpManager(
     )
 
     /** 供 MCP 设置页展示 key 池只读状态。 */
-    fun keyPoolSnapshot(config: McpServerConfig) = keyPoolRuntime.snapshot(config)
+    fun keyPoolSnapshot(config: McpServerConfig, pools: List<McpKeyPool> = emptyList()) =
+        keyPoolRuntime.snapshot(config, pools)
 
     init {
         appScope.launch {
