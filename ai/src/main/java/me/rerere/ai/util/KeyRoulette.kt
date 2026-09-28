@@ -45,6 +45,9 @@ interface KeyRoulette {
     /** 上报 key 成功，清除冷却。默认空实现。 */
     fun reportSuccess(key: String, providerId: String) {}
 
+    /** 手动重置：清除该桶所有 key 的冷却（保留轮询进度）。默认空实现。 */
+    fun resetCooldown(providerId: String) {}
+
     /** 只读快照。默认返回空快照。 */
     fun snapshot(keys: String, providerId: String): KeyPoolSnapshot {
         return KeyPoolSnapshot(total = splitApiKeys(keys).size)
@@ -198,8 +201,24 @@ internal class LruKeyRoulette(
         }
     }
 
-    override fun snapshot(keys: String, providerId: String): KeyPoolSnapshot {
-        val keyList = splitApiKeys(keys)
+    override fun resetCooldown(providerId: String) {
+        synchronized(LruFileLock) {
+            val allCache = storage.load().toMutableMap()
+            val providerCache = allCache[providerId]?.toMutableMap() ?: return
+            var changed = false
+            providerCache.forEach { (k, state) ->
+                if (state.cooldownUntil != 0L) {
+                    providerCache[k] = state.copy(cooldownUntil = 0L)
+                    changed = true
+                }
+            }
+            if (!changed) return
+            allCache[providerId] = providerCache
+            storage.save(allCache)
+        }
+    }
+
+    override fun snapshot(keys: String, providerId: String): KeyPoolSnapshot {        val keyList = splitApiKeys(keys)
         if (keyList.isEmpty()) return KeyPoolSnapshot()
         synchronized(LruFileLock) {
             val now = clock()

@@ -14,9 +14,9 @@ data class McpCommonOptions(
     val oauth: McpOAuthState? = null,
     // Key 池：多 key 用换行/空格/逗号分隔，请求头值中用 ${key} 占位符引用
     val keys: String = "",
-    // key 失败冷却时长（小时），默认 24，最小 1
-    val keyCooldownHours: Int = 24,
-    // 共享池引用：非空时忽略内联 keys/冷却，走对应池
+    // 额度刷新周期（小时）：失败的 key 被暂时移出轮询，该时长后自动恢复；默认 24，最小 1
+    val quotaRefreshHours: Int = 24,
+    // 共享池引用：非空时忽略内联 keys/刷新周期，走对应池
     val keyPoolId: Uuid? = null,
 )
 
@@ -25,7 +25,7 @@ data class McpKeyPool(
     val id: Uuid = Uuid.random(),
     val name: String = "",
     val keys: String = "",
-    val keyCooldownHours: Int = 24,
+    val quotaRefreshHours: Int = 24,
 )
 
 /**

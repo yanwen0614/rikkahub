@@ -50,8 +50,8 @@ fun isMcpKeyFailure(error: Throwable): Boolean {
     return isMcpKeyFailureCode(extractMcpHttpCode(error))
 }
 
-/** 冷却小时数转毫秒，最小 1 小时。 */
-fun mcpCooldownMillis(hours: Int): Long {
+/** 刷新周期小时数转毫秒，最小 1 小时。 */
+fun quotaRefreshMillis(hours: Int): Long {
     return (hours.coerceAtLeast(1)).toLong() * 60L * 60L * 1000L
 }
 
@@ -75,9 +75,9 @@ class McpKeyPoolRuntime(
         return effectivePool(config, pools)?.keys ?: config.commonOptions.keys
     }
 
-    /** 有效冷却小时数：共享池优先，否则内联。 */
-    fun effectiveCooldownHours(config: McpServerConfig, pools: List<McpKeyPool>): Int {
-        return effectivePool(config, pools)?.keyCooldownHours ?: config.commonOptions.keyCooldownHours
+    /** 有效刷新周期小时数：共享池优先，否则内联。 */
+    fun effectiveQuotaRefreshHours(config: McpServerConfig, pools: List<McpKeyPool>): Int {
+        return effectivePool(config, pools)?.quotaRefreshHours ?: config.commonOptions.quotaRefreshHours
     }
 
     /** 有效桶 ID：共享池多 Server 共用一桶，否则按 Server 隔离。 */
@@ -129,7 +129,7 @@ class McpKeyPoolRuntime(
     }
 
     fun reportFailure(config: McpServerConfig, key: String, pools: List<McpKeyPool> = emptyList()) {
-        roulette.reportFailure(key, effectiveProviderId(config, pools), mcpCooldownMillis(effectiveCooldownHours(config, pools)))
+        roulette.reportFailure(key, effectiveProviderId(config, pools), quotaRefreshMillis(effectiveQuotaRefreshHours(config, pools)))
     }
 
     fun reportSuccess(config: McpServerConfig, key: String, pools: List<McpKeyPool> = emptyList()) {
@@ -140,6 +140,22 @@ class McpKeyPoolRuntime(
         effectiveKeys(config, pools),
         effectiveProviderId(config, pools),
     )
+
+    /** 手动重置：立即恢复该有效桶内所有待刷新 key（保留轮询进度）。 */
+    fun resetCooldown(config: McpServerConfig, pools: List<McpKeyPool> = emptyList()) {
+        roulette.resetCooldown(effectiveProviderId(config, pools))
+    }
+
+    /** 池页直查：不依赖某个 Server 的快照。 */
+    fun snapshotForPool(pool: McpKeyPool) = roulette.snapshot(
+        pool.keys,
+        "mcp-pool-${pool.id}",
+    )
+
+    /** 池页直调：手动重置整个池。 */
+    fun resetPool(pool: McpKeyPool) {
+        roulette.resetCooldown("mcp-pool-${pool.id}")
+    }
 
     fun providerId(serverId: Uuid): String = serverId.toString()
 }

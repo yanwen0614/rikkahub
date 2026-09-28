@@ -943,14 +943,14 @@ private fun McpKeyPoolConfigure(
                 }
             )
             OutlinedTextField(
-                value = (selectedPool?.keyCooldownHours ?: config.commonOptions.keyCooldownHours).toString(),
+                value = (selectedPool?.quotaRefreshHours ?: config.commonOptions.quotaRefreshHours).toString(),
                 onValueChange = { v ->
                     v.toIntOrNull()?.let { hours ->
-                        if (selectedPool == null) updateCommon { it.copy(keyCooldownHours = hours.coerceAtLeast(1)) }
+                        if (selectedPool == null) updateCommon { it.copy(quotaRefreshHours = hours.coerceAtLeast(1)) }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.setting_mcp_page_key_cooldown)) },
+                label = { Text("额度刷新周期（小时）") },
                 singleLine = true,
                 enabled = selectedPool == null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -980,21 +980,31 @@ private fun McpKeyPoolConfigure(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            // 只读状态行：共 N 个 key、M 个冷却中
+            // 只读状态行：共 N 个 key、M 个待刷新 + 手动重置
             val mcpManager = koinInject<McpManager>()
             val snapshot = remember(effectiveKeys, config.commonOptions.keyPoolId, config.id) {
                 runCatching { mcpManager.keyPoolSnapshot(config, poolList) }.getOrNull()
             }
             if (effectiveKeys.isNotBlank() && snapshot != null) {
-                Text(
-                    text = stringResource(
-                        R.string.setting_mcp_page_key_pool_status,
-                        snapshot.total,
-                        snapshot.cooling,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.setting_mcp_page_key_pool_status,
+                            snapshot.total,
+                            snapshot.cooling,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = { mcpManager.resetKeyPool(config, poolList) },
+                        enabled = snapshot.cooling > 0,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) { Text("手动重置", style = MaterialTheme.typography.bodySmall) }
+                }
             }
         }
     }
@@ -1177,7 +1187,7 @@ internal fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
         val headers = obj["headers"]?.jsonObject?.entries?.map { (k, v) ->
             k to (v.jsonPrimitive.contentOrNull ?: "")
         } ?: emptyList()
-        // 扩展字段可选识别：keys 接受字符串或数组，keyCooldownHours 为整数小时
+        // 扩展字段可选识别：keys 接受字符串或数组，quotaRefreshHours（兼容旧 keyCooldownHours）为整数小时
         val keysElement = obj["keys"]
         val keys = when {
             keysElement == null -> ""
@@ -1186,13 +1196,15 @@ internal fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
             }.joinToString("\n")
             else -> keysElement.jsonPrimitive.contentOrNull ?: ""
         }
-        val keyCooldownHours = obj["keyCooldownHours"]?.jsonPrimitive?.contentOrNull
-            ?.toIntOrNull()?.coerceAtLeast(1) ?: 24
+        val quotaRefreshHours = obj["quotaRefreshHours"]?.jsonPrimitive?.contentOrNull
+            ?.toIntOrNull()
+            ?: obj["keyCooldownHours"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+        val refreshHours = quotaRefreshHours?.coerceAtLeast(1) ?: 24
         val commonOptions = McpCommonOptions(
             name = name,
             headers = headers,
             keys = keys,
-            keyCooldownHours = keyCooldownHours,
+            quotaRefreshHours = refreshHours,
         )
         when (type) {
             "sse" -> McpServerConfig.SseTransportServer(commonOptions = commonOptions, url = url)

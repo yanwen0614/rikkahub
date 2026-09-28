@@ -111,9 +111,9 @@ class McpKeyPoolRuntimeTest {
     }
 
     @Test
-    fun `mcp 冷却时长最小 1 小时`() {
-        assertEquals(24L * 3600_000L, mcpCooldownMillis(24))
-        assertEquals(1L * 3600_000L, mcpCooldownMillis(0))
+    fun `mcp 刷新周期最小 1 小时`() {
+        assertEquals(24L * 3600_000L, quotaRefreshMillis(24))
+        assertEquals(1L * 3600_000L, quotaRefreshMillis(0))
     }
 
     @Test
@@ -141,5 +141,24 @@ class McpKeyPoolRuntimeTest {
         )
         assertTrue(r.hasKeyPool(inline, emptyList()))
         assertEquals(2, r.snapshot(inline, emptyList()).total)
+    }
+
+    @Test
+    fun `手动重置立即恢复待刷新key且保留轮询进度`() {
+        val r = runtime()
+        val pool = McpKeyPool(name = "shared", keys = "k1 k2")
+        val pools = listOf(pool)
+        val a = config().copy(commonOptions = config().commonOptions.copy(keyPoolId = pool.id))
+        val first = r.selectKey(a, pools = pools)!!
+        r.reportFailure(a, first, pools)
+        assertEquals(1, r.snapshot(a, pools).cooling)
+        // 整池重置：另一 Server 视角同样恢复
+        r.resetPool(pool)
+        val snap = r.snapshot(a, pools)
+        assertEquals(0, snap.cooling)
+        assertEquals(2, snap.total)
+        // 轮询进度保留：刚用过的 key 不会被优先选中（另一 key 更久未用）
+        val other = if (first == "k1") "k2" else "k1"
+        assertEquals(other, r.selectKey(a, pools = pools))
     }
 }
