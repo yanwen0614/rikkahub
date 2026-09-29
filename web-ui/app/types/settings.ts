@@ -90,9 +90,9 @@ export interface McpCommonOptions {
   enable: boolean;
   name: string;
   tools: McpToolOption[];
-  // Key 池：多 key 用换行/空格/逗号分隔，请求头值中用 ${key} 占位符引用；keyCooldownHours 为冷却小时数
+  // Key 池：多 key 用换行/空格/逗号分隔，请求头值中用 ${key} 占位符引用；quotaRefreshHours 为额度刷新周期小时数
   keys?: string;
-  keyCooldownHours?: number;
+  quotaRefreshHours?: number;
   [key: string]: unknown;
 }
 

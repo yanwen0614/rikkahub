@@ -95,6 +95,16 @@ class McpManager(
     fun keyPoolSnapshot(config: McpServerConfig, pools: List<McpKeyPool> = emptyList()) =
         keyPoolRuntime.snapshot(config, pools)
 
+    /** 供 MCP 设置页手动重置某 Server 有效桶。 */
+    fun resetKeyPool(config: McpServerConfig, pools: List<McpKeyPool> = emptyList()) =
+        keyPoolRuntime.resetCooldown(config, pools)
+
+    /** 供共享池页面展示/重置整个池。 */
+    fun poolSnapshot(pool: McpKeyPool) = keyPoolRuntime.snapshotForPool(pool)
+
+    /** 供共享池页面手动重置整个池。 */
+    fun resetPool(pool: McpKeyPool) = keyPoolRuntime.resetPool(pool)
+
     init {
         appScope.launch {
             settingsStore.settingsFlow

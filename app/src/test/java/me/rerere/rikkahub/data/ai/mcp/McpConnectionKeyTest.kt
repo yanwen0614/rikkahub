@@ -49,7 +49,7 @@ class McpConnectionKeyTest {
         assertEquals(base.connectionKey(), withKeys.connectionKey())
 
         val withCooldown = withKeys.copy(
-            commonOptions = withKeys.commonOptions.copy(keyCooldownHours = 1)
+            commonOptions = withKeys.commonOptions.copy(quotaRefreshHours = 1)
         )
         assertEquals(base.connectionKey(), withCooldown.connectionKey())
 
