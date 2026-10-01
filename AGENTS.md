@@ -34,7 +34,16 @@ Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
   `upstream = https://github.com/rikkahub/rikkahub.git` (official read-only, never push).
 - Work branch: daily use `dev/refactor` (tracks `origin/dev/refactor`).
 - `master`: mirror only. Sync: `git checkout master && git fetch upstream && git merge --ff-only upstream/master && git push origin master`. Non-FF -> stop, investigate.
-- Sync upstream into work (merge, keep history): `git checkout dev/refactor && git fetch upstream && git merge upstream/master && git push origin dev/refactor`. No rebase, no `push upstream`, keep `pull.rebase=false`.
+- Sync upstream into work (merge, keep history): 分步执行，避免 fetch 空跑导致漏合并：
+  ```bash
+  git checkout dev/refactor
+  git fetch upstream
+  git rev-list --count HEAD..upstream/master   # 预期 >0；若为 0 警吀可能上游未刷新
+  git merge upstream/master
+  git merge-base --is-ancestor upstream/master HEAD  # 验证：应返回 0 (true)
+  git push origin dev/refactor
+  ```
+  No rebase, no `push upstream`, keep `pull.rebase=false`.
 - Daily check: `git rev-list --left-right --count HEAD...upstream/master`, merge first if behind.
 - Upstream branches `feat/context-limit、refactor/ai-stream、refactor/chat-service` ignored by default, `git fetch upstream <branch>` on demand.
 
