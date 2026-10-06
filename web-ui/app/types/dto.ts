@@ -1,5 +1,6 @@
 import type { TokenUsage } from "./core";
 import type { UIMessageAnnotation } from "./annotations";
+import type { ConversationConfig } from "./conversation";
 import type { UIMessagePart } from "./parts";
 
 export interface ConversationListDto {
@@ -72,6 +73,8 @@ export interface MessageDto {
   modelId?: string | null;
   usage?: TokenUsage | null;
   translation?: string | null;
+  /** 压缩检查点：此消息是它之前全部历史的摘要，之前的消息不再发送给模型 */
+  isContextCheckpoint?: boolean;
 }
 
 export interface MessageNodeDto {
@@ -90,6 +93,7 @@ export interface ConversationDto {
   customSystemPrompt?: string | null;
   modeInjectionIds?: string[];
   lorebookIds?: string[];
+  config?: ConversationConfig | null;
   workspaceCwd?: string | null;
   folderId?: string | null;
   createAt: number;

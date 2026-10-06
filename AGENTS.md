@@ -27,6 +27,7 @@ Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
 - **web-ui**: Embedded React SPA -> `web-ui/AGENTS.md`
 - **locale-tui**: strings.xml TUI tool -> `locale-tui/AGENTS.md`
 - **common/material3/videogen/trace-cli/oauth/build-logic**: small shared modules, no separate guide.
+- **ui**: Reusable Compose UI components that do not depend on app logic
 
 ## Git / Branch / Upstream Sync（fork私用，不提PR）
 
@@ -46,6 +47,16 @@ Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
   No rebase, no `push upstream`, keep `pull.rebase=false`.
 - Daily check: `git rev-list --left-right --count HEAD...upstream/master`, merge first if behind.
 - Upstream branches `feat/context-limit、refactor/ai-stream、refactor/chat-service` ignored by default, `git fetch upstream <branch>` on demand.
+
+- **Conversation**: A persistent conversation thread between the user and an assistant. Each conversation maintains a
+  list of MessageNodes in a tree structure to support message branching, along with metadata like title, creation time,
+  update time, pin status, chat suggestions, optional conversation-level system prompt, and prompt injection bindings.
+  Once a conversation is persisted it also holds a `ConversationConfig` snapshot (chat model, reasoning level, search,
+  MCP servers, workspace, skills) taken from the assistant; from then on chat-page changes to those settings stay on
+  the conversation, and code should read them through `Settings.getAssistantOf(conversation)` /
+  `Settings.getChatModelOf(conversation)` instead of the assistant directly. (
+  app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt,
+  app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt)
 
 ## Skills
 
