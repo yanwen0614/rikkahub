@@ -911,7 +911,7 @@ private fun McpKeyPoolConfigure(
                     )
                 }
                 if (useShared) {
-                    me.rerere.rikkahub.ui.components.ui.SelectTextField(
+                    me.rerere.ui.components.SelectTextField(
                         value = selectedPool?.name?.ifBlank { "未命名池" } ?: "选择共享池",
                         options = poolList,
                         onOptionSelected = { pool ->
