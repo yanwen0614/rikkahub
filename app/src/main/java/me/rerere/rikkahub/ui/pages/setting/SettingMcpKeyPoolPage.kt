@@ -59,7 +59,7 @@ fun SettingMcpKeyPoolPage(vm: SettingVM = koinViewModel()) {
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = {
-                        vm.updateSettings(settings.copy(mcpKeyPools = pools + McpKeyPool(name = "新池")))
+                        vm.updateSettings { it.copy(mcpKeyPools = it.mcpKeyPools + McpKeyPool(name = "新池")) }
                     }) { Icon(HugeIcons.Add01, null) }
                 },
                 scrollBehavior = scrollBehavior,
@@ -92,20 +92,20 @@ fun SettingMcpKeyPoolPage(vm: SettingVM = koinViewModel()) {
                             OutlinedTextField(
                                 value = pool.name,
                                 onValueChange = { v ->
-                                    vm.updateSettings(settings.copy(mcpKeyPools = pools.map { if (it.id == pool.id) it.copy(name = v) else it }))
+                                    vm.updateSettings { s -> s.copy(mcpKeyPools = s.mcpKeyPools.map { p -> if (p.id == pool.id) p.copy(name = v) else p }) }
                                 },
                                 modifier = Modifier.weight(1f),
                                 label = { Text("池名 ($usage 个 MCP 在用)") },
                                 singleLine = true
                             )
                             IconButton(onClick = {
-                                if (usage == 0) vm.updateSettings(settings.copy(mcpKeyPools = pools.filter { it.id != pool.id }))
+                                if (usage == 0) vm.updateSettings { s -> s.copy(mcpKeyPools = s.mcpKeyPools.filter { it.id != pool.id }) }
                             }, enabled = usage == 0) { Icon(HugeIcons.Delete01, null) }
                         }
                         OutlinedTextField(
                             value = pool.keys,
                             onValueChange = { v ->
-                                vm.updateSettings(settings.copy(mcpKeyPools = pools.map { if (it.id == pool.id) it.copy(keys = v) else it }))
+                                vm.updateSettings { s -> s.copy(mcpKeyPools = s.mcpKeyPools.map { p -> if (p.id == pool.id) p.copy(keys = v) else p }) }
                             },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Keys（一行一个）") },
@@ -124,7 +124,7 @@ fun SettingMcpKeyPoolPage(vm: SettingVM = koinViewModel()) {
                             value = pool.quotaRefreshHours.toString(),
                             onValueChange = { v ->
                                 v.toIntOrNull()?.let { h ->
-                                    vm.updateSettings(settings.copy(mcpKeyPools = pools.map { if (it.id == pool.id) it.copy(quotaRefreshHours = h.coerceAtLeast(1)) else it }))
+                                    vm.updateSettings { s -> s.copy(mcpKeyPools = s.mcpKeyPools.map { p -> if (p.id == pool.id) p.copy(quotaRefreshHours = h.coerceAtLeast(1)) else p }) }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
