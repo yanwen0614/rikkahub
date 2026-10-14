@@ -793,6 +793,7 @@
   <string name="setting_model_page_prompt">Prompt</string>
   <string name="setting_model_page_reset_to_default">Reset to default</string>
   <string name="setting_model_page_enable_suggestion">Enable Chat Suggestions</string>
+  <string name="setting_model_page_enable_auto_title">Auto-generate Conversation Titles</string>
   <string name="setting_model_page_suggestion_model">Chat Suggestion Model</string>
   <string name="setting_model_page_suggestion_model_desc">Model used to generate conversation suggestions. If not set, uses the fast model</string>
   <string name="setting_model_page_suggestion_prompt_vars">Variables: Conversation content: {content}, Language: {locale}</string>
@@ -1597,4 +1598,18 @@
   <string name="setting_provider_page_context_length">Context Length</string>
   <string name="setting_provider_page_context_length_custom">Custom</string>
   <string name="setting_media_page_asset_storage">Asset Storage</string>
+  <string name="translator_page_error">Translation failed</string>
+  <string name="translator_page_model_missing">No translation model selected. Tap the top-right corner to choose one.</string>
+  <string name="translator_page_char_count">%1$d characters</string>
+  <string name="translator_page_clear_input">Clear input</string>
+  <string name="translator_page_paste">Paste</string>
+  <string name="translator_page_use_as_input">Use as input</string>
+  <string name="translator_page_history">Translation history</string>
+  <string name="translator_page_clear_history">Clear</string>
+  <string name="translator_page_clear_history_title">Clear translation history</string>
+  <string name="translator_page_clear_history_message">All translation records will be deleted. This cannot be undone.</string>
+  <string name="setting_display_page_enable_quote_highlight_title">Highlight Quoted Text</string>
+  <string name="setting_display_page_enable_quote_highlight_desc">Color text inside quotation marks with the theme color to make character dialogue stand out</string>
+  <string name="workspace_detail_copy_path">Copy path</string>
+  <string name="workspace_detail_path_copied">Path copied</string>
 </resources>
