@@ -1,0 +1,34 @@
+{
+    "logs": [
+        {
+            "outputFile": "me.rerere.videogen-release-45:/values-h720dp-v13/values-h720dp-v13.xml",
+            "map": [
+                {
+                    "source": "/home/starcyan/.gradle/caches/9.6.0/transforms/bea6bc7920cdd2e677e1c222132c6b3f/transformed/appcompat-1.8.0/res/values-h720dp-v13/values-h720dp-v13.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "66",
+                        "endOffsets": "117"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "me.rerere.videogen-mergeReleaseResources-43:/values-h720dp-v13/values-h720dp-v13.xml",
+            "map": [
+                {
+                    "source": "/home/starcyan/.gradle/caches/9.6.0/transforms/bea6bc7920cdd2e677e1c222132c6b3f/transformed/appcompat-1.8.0/res/values-h720dp-v13/values-h720dp-v13.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "66",
+                        "endOffsets": "117"
+                    }
+                }
+            ]
+        }
+    ]
+}

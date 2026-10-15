@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "me.rerere.videogen-release-45:/layout-v26/mtrl_calendar_month.xml",
+        "source": "me.rerere.videogen-material-1.14.0-8:/layout-v26/mtrl_calendar_month.xml"
+    },
+    {
+        "merged": "me.rerere.videogen-release-45:/layout-v26/abc_screen_toolbar.xml",
+        "source": "me.rerere.videogen-appcompat-1.8.0-35:/layout-v26/abc_screen_toolbar.xml"
+    }
+]

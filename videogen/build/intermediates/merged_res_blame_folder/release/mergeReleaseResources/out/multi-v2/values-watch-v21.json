@@ -1,0 +1,36 @@
+{
+    "logs": [
+        {
+            "outputFile": "me.rerere.videogen-release-45:/values-watch-v21/values-watch-v21.xml",
+            "map": [
+                {
+                    "source": "/home/starcyan/.gradle/caches/9.6.0/transforms/bea6bc7920cdd2e677e1c222132c6b3f/transformed/appcompat-1.8.0/res/values-watch-v21/values-watch-v21.xml",
+                    "from": {
+                        "startLines": "2,6,10",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,271,499",
+                        "endLines": "5,9,13",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "266,494,724"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "me.rerere.videogen-mergeReleaseResources-43:/values-watch-v21/values-watch-v21.xml",
+            "map": [
+                {
+                    "source": "/home/starcyan/.gradle/caches/9.6.0/transforms/bea6bc7920cdd2e677e1c222132c6b3f/transformed/appcompat-1.8.0/res/values-watch-v21/values-watch-v21.xml",
+                    "from": {
+                        "startLines": "2,6,10",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,271,499",
+                        "endLines": "5,9,13",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "266,494,724"
+                    }
+                }
+            ]
+        }
+    ]
+}

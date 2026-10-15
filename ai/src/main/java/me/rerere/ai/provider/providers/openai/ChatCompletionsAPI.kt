@@ -76,8 +76,11 @@ private const val TAG = "ChatCompletionsAPI"
 
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
-    private val keyRoulette: KeyRoulette
+    keyRoulette: KeyRoulette,
+    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
+    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -90,14 +93,13 @@ class ChatCompletionsAPI(
                 providerSetting = providerSetting
             )
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
-            .build()
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
@@ -142,15 +144,14 @@ class ChatCompletionsAPI(
             stream = true,
         )
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
-            .build()
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 

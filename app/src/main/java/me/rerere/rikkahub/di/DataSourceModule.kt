@@ -16,6 +16,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
+import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.MemoryConsolidationScheduler
@@ -240,6 +241,12 @@ val dataSourceModule = module {
             .addInterceptor(HttpLoggingInterceptor().apply {
                 redactHeader("Proxy-Authorization")
                 level = HttpLoggingInterceptor.Level.HEADERS
+                redactHeader("Authorization")
+                redactHeader("Proxy-Authorization")
+                redactHeader("X-Api-Key")
+                redactHeader("Cookie")
+                redactHeader("Set-Cookie")
+                redactHeader("ChatGPT-Account-Id")
             })
             .build()
         client.also {
@@ -255,7 +262,18 @@ val dataSourceModule = module {
     }
 
     single {
-        ProviderManager(client = get(), context = get())
+        OpenAICodexAuthService(
+            httpClient = get(),
+            settingsStore = get(),
+        )
+    }
+
+    single {
+        ProviderManager(
+            client = get(),
+            context = get(),
+            openAICodexTokenProvider = get<OpenAICodexAuthService>(),
+        )
     }
 
     single { BackupManager(context = get(), database = get(), settingsStore = get(), json = get()) }

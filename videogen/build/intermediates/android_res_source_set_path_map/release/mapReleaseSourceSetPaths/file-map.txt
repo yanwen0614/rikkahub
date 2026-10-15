@@ -1,0 +1,9 @@
+me.rerere.videogen-pngs-0 /home/starcyan/code/rikkahub/videogen/build/generated/res/pngs/release
+me.rerere.videogen-updated_navigation_xml-1 /home/starcyan/code/rikkahub/videogen/build/generated/updated_navigation_xml/release
+me.rerere.videogen-mergeReleaseResources-2 /home/starcyan/code/rikkahub/videogen/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+me.rerere.videogen-mergeReleaseResources-3 /home/starcyan/code/rikkahub/videogen/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+me.rerere.videogen-release-4 /home/starcyan/code/rikkahub/videogen/build/intermediates/merged_res/release/mergeReleaseResources
+me.rerere.videogen-release-5 /home/starcyan/code/rikkahub/videogen/build/intermediates/packaged_res/release/packageReleaseResources
+me.rerere.videogen-main-6 /home/starcyan/code/rikkahub/videogen/src/main/res
+me.rerere.videogen-release-7 /home/starcyan/code/rikkahub/videogen/src/release/res
+gradleHome-0 /home/starcyan/.gradle

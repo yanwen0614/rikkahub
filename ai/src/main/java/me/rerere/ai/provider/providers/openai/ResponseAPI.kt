@@ -31,6 +31,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
@@ -39,6 +40,7 @@ import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolMetadata
@@ -49,6 +51,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.SSEEventSource
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
@@ -68,51 +71,63 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ResponseAPI"
+private const val EVENT_STREAM_MEDIA_TYPE = "text/event-stream"
+
+internal fun Request.Builder.acceptEventStream(): Request.Builder {
+    return header("Accept", EVENT_STREAM_MEDIA_TYPE)
+}
 
 class ResponseAPI(
     private val client: OkHttpClient,
-    private val keyRoulette: KeyRoulette = KeyRoulette.default()
+    keyRoulette: KeyRoulette = KeyRoulette.default(),
+    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
+    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult = withContext(Dispatchers.IO) {
-        val requestBody = buildRequestBody(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-            stream = false,
-        )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
-            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+    ): TextGenerationResult {
+        if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
+            return collectStreamingTextGeneration(
+                model = params.model,
+                stream = streamText(providerSetting, messages, params),
             )
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
-            .build()
+        }
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        return withContext(Dispatchers.IO) {
+            val requestBody = buildRequestBody(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params,
+                stream = false,
+            )
+            val requestBuilder = Request.Builder()
+                .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
+                .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader("Content-Type", "application/json")
+                .configureReferHeaders(providerSetting.baseUrl)
+                .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
+            val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
-        // await() waits for the response headers; reading the body can still block.
-        client.newCall(request).await().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+            Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+
+            // await() waits for the response headers; reading the body can still block.
+            client.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+                }
+
+                val bodyStr = response.body.string()
+                Log.i(TAG, "generateText: $bodyStr")
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+                parseResponseOutput(bodyJson)
             }
-
-            val bodyStr = response.body.string()
-            Log.i(TAG, "generateText: $bodyStr")
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            parseResponseOutput(bodyJson)
         }
     }
 
@@ -127,17 +142,14 @@ class ResponseAPI(
             params = params,
             stream = true,
         )
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .acceptEventStream()
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
-            .build()
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
@@ -196,7 +208,10 @@ class ResponseAPI(
             }
         }
 
-        val eventSource = EventSources.createFactory(client)
+        val eventSource = SSEEventSource.factory(
+            callFactory = client,
+            allowMissingContentType = providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION,
+        )
             .newEventSource(request, listener)
 
         awaitClose {
@@ -214,7 +229,7 @@ class ResponseAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
-        return buildJsonObject {
+        val body = buildJsonObject {
             put("model", params.model.modelId)
             put("stream", stream)
             put("store", false)
@@ -301,6 +316,12 @@ class ResponseAPI(
                 }
             }
         }.mergeCustomBody(params.customBody)
+
+        return if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
+            JsonObject(body + ("stream" to JsonPrimitive(true)))
+        } else {
+            body
+        }
     }
 
     internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
@@ -664,6 +685,30 @@ class ResponseAPI(
                 ?: 0
         )
     }
+}
+
+internal suspend fun collectStreamingTextGeneration(
+    model: Model,
+    stream: Flow<StreamChunk>,
+): TextGenerationResult {
+    val handler = StreamChunkHandler(model)
+    var messages = listOf(UIMessage(role = MessageRole.USER, parts = emptyList()))
+    var finish: StreamChunk.Finish? = null
+
+    stream.collect { chunk ->
+        messages = handler.handle(messages, chunk)
+        if (chunk is StreamChunk.Finish) finish = chunk
+    }
+
+    val message = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+        ?: error("Streaming response completed without an assistant message")
+    return TextGenerationResult(
+        id = finish?.responseId.orEmpty(),
+        model = finish?.model ?: model.modelId,
+        message = message,
+        finishReason = finish?.finishReason,
+        usage = message.usage,
+    )
 }
 
 internal fun isOpenAIServerToolCall(type: String): Boolean =

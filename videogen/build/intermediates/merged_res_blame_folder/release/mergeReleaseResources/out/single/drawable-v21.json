@@ -1,0 +1,22 @@
+[
+    {
+        "merged": "me.rerere.videogen-release-45:/drawable-v21/abc_action_bar_item_background_material.xml",
+        "source": "me.rerere.videogen-appcompat-1.8.0-35:/drawable-v21/abc_action_bar_item_background_material.xml"
+    },
+    {
+        "merged": "me.rerere.videogen-release-45:/drawable-v21/abc_list_divider_material.xml",
+        "source": "me.rerere.videogen-appcompat-1.8.0-35:/drawable-v21/abc_list_divider_material.xml"
+    },
+    {
+        "merged": "me.rerere.videogen-release-45:/drawable-v21/abc_btn_colored_material.xml",
+        "source": "me.rerere.videogen-appcompat-1.8.0-35:/drawable-v21/abc_btn_colored_material.xml"
+    },
+    {
+        "merged": "me.rerere.videogen-release-45:/drawable-v21/abc_dialog_material_background.xml",
+        "source": "me.rerere.videogen-appcompat-1.8.0-35:/drawable-v21/abc_dialog_material_background.xml"
+    },
+    {
+        "merged": "me.rerere.videogen-release-45:/drawable-v21/abc_edit_text_material.xml",
+        "source": "me.rerere.videogen-appcompat-1.8.0-35:/drawable-v21/abc_edit_text_material.xml"
+    }
+]

@@ -66,6 +66,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.Key01
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.MessageBlocked
 import me.rerere.rikkahub.R
@@ -104,6 +105,11 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 actions = {
+                    IconButton(
+                        onClick = { navController.navigate(Screen.SettingMcpKeyPool) }
+                    ) {
+                        Icon(HugeIcons.Key01, null)
+                    }
                     IconButton(
                         onClick = {
                             showImportDialog = true
