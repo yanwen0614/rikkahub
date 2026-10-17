@@ -18,7 +18,6 @@ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
-import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.MemoryConsolidationScheduler
 import me.rerere.rikkahub.data.ai.MemoryConsolidator
 import me.rerere.rikkahub.data.ai.TranslationHandler
@@ -142,16 +141,8 @@ val dataSourceModule = module {
     }
 
     single {
-        GenerationLoop(
-            context = get(),
-            providerManager = get(),
-            json = get(),
-        )
-    }
-
-    single {
         MemoryConsolidator(
-            generationLoop = get(),
+            providerManager = get(),
             memoryRepository = get(),
             conversationRepo = get(),
             consolidationDao = get(),

@@ -229,6 +229,9 @@ private fun SearchServiceOptionsEditor(
         is SearchServiceOptions.SerperOptions -> {
             SerperOptions(options, onUpdateOptions = { onUpdateOptions(it) }, keyPoolTick = keyPoolTick)
         }
+        is SearchServiceOptions.DeepSeekOptions -> {
+            DeepSeekOptions(options) { onUpdateOptions(it) }
+        }
         is SearchServiceOptions.CustomJsOptions -> {
             CustomJsOptions(options) { onUpdateOptions(it) }
         }
@@ -687,6 +690,26 @@ internal fun SerperOptions(
         onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
         onCooldownChange = { onUpdateOptions(options.copy(keyCooldownHours = it)) },
     )
+}
+
+@Composable
+internal fun DeepSeekOptions(
+    options: SearchServiceOptions.DeepSeekOptions,
+    onUpdateOptions: (SearchServiceOptions.DeepSeekOptions) -> Unit
+) {
+    FormItem(
+        label = {
+            Text(stringResource(R.string.search_detail_api_key))
+        }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = {
+                onUpdateOptions(options.copy(apiKey = it))
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
 
 @Composable
