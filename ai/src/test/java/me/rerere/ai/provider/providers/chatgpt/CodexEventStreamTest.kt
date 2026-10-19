@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
@@ -56,14 +57,14 @@ class CodexEventStreamTest {
 
     """.trimIndent()
 
-    // 假后端：和真实响应一样，200 但没有 Content-Type
+    // 假后端：和真实响应一样，200 且带 event-stream Content-Type
     private val codexBackend = Interceptor { chain ->
         Response.Builder()
             .request(chain.request())
             .protocol(Protocol.HTTP_2)
             .code(200)
             .message("")
-            .body(codexStream.toResponseBody(null))
+            .body(codexStream.toResponseBody("text/event-stream".toMediaType()))
             .build()
     }
 
@@ -101,7 +102,6 @@ class CodexEventStreamTest {
                     done.countDown()
                 }
             },
-            allowMissingContentType = true,
         )
         assertTrue("stream did not finish", done.await(10, TimeUnit.SECONDS))
         return Result(text.toString(), failure, finish)

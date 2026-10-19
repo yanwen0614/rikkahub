@@ -35,35 +35,6 @@ enum class ClaudePromptCacheTtl(val apiValue: String?) {
     ONE_HOUR("1h")
 }
 
-/** Authentication methods supported by an OpenAI-compatible provider. */
-@Serializable
-enum class OpenAIAuthType {
-    @SerialName("api_key")
-    API_KEY,
-
-    /** ChatGPT subscription credentials used by the OpenAI Codex backend. */
-    @SerialName("chatgpt_subscription")
-    CHATGPT_SUBSCRIPTION,
-}
-
-/**
- * OAuth credentials returned by OpenAI's Codex device authorization flow.
- *
- * The refresh token is persisted with the provider settings so a subscription session can be
- * renewed without asking the user to sign in every hour.
- */
-@Serializable
-data class OpenAICodexCredentials(
-    val accessToken: String,
-    val refreshToken: String,
-    val accountId: String,
-    val expiresAt: Long = 0L,
-    val email: String? = null,
-    val planType: String? = null,
-)
-
-const val OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-
 /**
  * 是否支持模型内置联网搜索（[BuiltInTools.Search]）。
  *
@@ -132,8 +103,6 @@ sealed class ProviderSetting {
         var useResponseApi: Boolean = false,
         var includeHistoryReasoning: Boolean = true,
         var responsesPath: String = "/responses",
-        var authType: OpenAIAuthType = OpenAIAuthType.API_KEY,
-        var codexCredentials: OpenAICodexCredentials? = null,
     ) : ApiKey() {
         override fun withQuotaQuery(query: QuotaQuery): ApiKey = copy(quotaQuery = query)
 

@@ -1,7 +1,5 @@
 package me.rerere.ai.provider.providers.openai
 
-import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
-import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -9,22 +7,8 @@ import org.junit.Test
 
 class OpenAIProviderModelsTest {
     @Test
-    fun `Codex subscription model URL includes client version`() {
-        val setting = ProviderSetting.OpenAI(
-            authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
-            baseUrl = OPENAI_CODEX_BASE_URL,
-        )
-
-        val url = openAIModelsUrl(setting)
-
-        assertEquals("$OPENAI_CODEX_BASE_URL/models", url.toString().substringBefore('?'))
-        assertEquals("0.148.0", url.queryParameter("client_version"))
-    }
-
-    @Test
     fun `API key model URL keeps standard shape`() {
         val setting = ProviderSetting.OpenAI(
-            authType = OpenAIAuthType.API_KEY,
             baseUrl = "https://api.openai.com/v1",
         )
 

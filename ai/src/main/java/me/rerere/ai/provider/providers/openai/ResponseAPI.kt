@@ -33,7 +33,6 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
-import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.TextGenerationResult
@@ -41,7 +40,6 @@ import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.registry.ModelRegistry
-import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolMetadata
@@ -53,7 +51,6 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.common.http.sse.newEventSource
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
@@ -98,34 +95,19 @@ internal class ResponsesEndpoint(
 class ResponseAPI(
     private val client: OkHttpClient,
     private val keyRoulette: KeyRoulette = KeyRoulette.default(),
-    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
-    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
 
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult {
-        if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
-            return collectStreamingTextGeneration(
-                model = params.model,
-                stream = streamText(providerSetting, messages, params),
-            )
-        }
-        return generateText(providerSetting.toResponsesEndpoint(params), messages, params)
-    }
+    ): TextGenerationResult = generateText(providerSetting.toResponsesEndpoint(params), messages, params)
 
     override suspend fun streamText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<StreamChunk> {
-        if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
-            return streamTextCodex(providerSetting, messages, params)
-        }
-        return streamText(providerSetting.toResponsesEndpoint(params), messages, params)
-    }
+    ): Flow<StreamChunk> = streamText(providerSetting.toResponsesEndpoint(params), messages, params)
 
     private fun ProviderSetting.OpenAI.toResponsesEndpoint(params: TextGenerationParams) = ResponsesEndpoint(
         url = "$baseUrl$responsesPath",
@@ -170,95 +152,6 @@ class ResponseAPI(
             parseResponseOutput(bodyJson)
         }
     }
-
-    private suspend fun streamTextCodex(
-        providerSetting: ProviderSetting.OpenAI,
-        messages: List<UIMessage>,
-        params: TextGenerationParams
-    ): Flow<StreamChunk> = callbackFlow {
-        val requestBuilder = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
-            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
-            .acceptEventStream()
-            .post(
-                json.encodeToString(
-                    buildRequestBody(
-                        capabilities = resolveResponseProviderCapabilities(providerSetting.baseUrl.toHttpUrl().host),
-                        messages = messages,
-                        params = params,
-                        stream = true,
-                    )
-                ).toRequestBody("application/json".toMediaType())
-            )
-            .configureReferHeaders(providerSetting.baseUrl)
-            .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
-        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
-
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBuilder)}")
-
-        val decoder = ResponseApiStreamDecoder()
-
-        fun sendChunks(chunks: Iterable<StreamChunk>) {
-            chunks.forEach { chunk ->
-                trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
-                }
-            }
-        }
-
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                Log.d(TAG, "onEvent: $id/$type $data")
-                try {
-                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-                    sendChunks(result.chunks)
-                    if (result.completed) close()
-                } catch (e: Throwable) {
-                    close(e)
-                }
-            }
-
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
-
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        println(bodyElement)
-                        exception = bodyElement.parseErrorDetail()
-                        Log.i(TAG, "onFailure: $exception")
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                } finally {
-                    close(exception)
-                }
-            }
-
-            override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
-            }
-        }
-
-        val eventSource = client.newEventSource(request, listener, allowMissingContentType = true)
-
-        awaitClose {
-            println("[awaitClose] 关闭eventSource ")
-            eventSource.cancel()
-        }
-        // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
-    }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
     internal fun streamText(
         endpoint: ResponsesEndpoint,
@@ -824,30 +717,6 @@ class ResponseAPI(
                 ?: 0
         )
     }
-}
-
-internal suspend fun collectStreamingTextGeneration(
-    model: Model,
-    stream: Flow<StreamChunk>,
-): TextGenerationResult {
-    val handler = StreamChunkHandler(model)
-    var messages = listOf(UIMessage(role = MessageRole.USER, parts = emptyList()))
-    var finish: StreamChunk.Finish? = null
-
-    stream.collect { chunk ->
-        messages = handler.handle(messages, chunk)
-        if (chunk is StreamChunk.Finish) finish = chunk
-    }
-
-    val message = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
-        ?: error("Streaming response completed without an assistant message")
-    return TextGenerationResult(
-        id = finish?.responseId.orEmpty(),
-        model = finish?.model ?: model.modelId,
-        message = message,
-        finishReason = finish?.finishReason,
-        usage = message.usage,
-    )
 }
 
 // function_call_output.output 可以是字符串，也可以是 input_text 等内容数组

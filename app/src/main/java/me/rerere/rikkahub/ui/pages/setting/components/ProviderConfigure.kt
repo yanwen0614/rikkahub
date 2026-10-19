@@ -1,13 +1,9 @@
 package me.rerere.rikkahub.ui.pages.setting.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,21 +12,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.ProgressIndicatorDefaults
-import androidx.compose.ui.Alignment
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,8 +32,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import me.rerere.ui.toast.ToastType
 import me.rerere.ai.provider.ClaudePromptCacheTtl
-import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
-import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.ProviderQuota
 import me.rerere.ai.provider.UsageWindow
@@ -56,8 +41,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.account.AccountLoginStatus
 import me.rerere.rikkahub.data.ai.account.ChatGPTAuth
 import me.rerere.rikkahub.data.ai.account.ProviderAccountManager
-import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
-import me.rerere.rikkahub.data.ai.openai.OpenAICodexDeviceCode
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.hugeicons.HugeIcons
@@ -86,7 +69,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
@@ -193,9 +175,6 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
 }
 
 internal fun ProviderSetting.defaultBaseUrlForReset(): String {
-    if (this is ProviderSetting.OpenAI && authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
-        return OPENAI_CODEX_BASE_URL
-    }
     val defaultProvider = DEFAULT_PROVIDERS.find { it.id == id }
     if (defaultProvider is ProviderSetting.ApiKey && defaultProvider::class == this::class) {
         return defaultProvider.baseUrl
@@ -257,24 +236,16 @@ private fun String.normalizePath(): String {
 private fun String.isValidBaseUrl(): Boolean = this.toHttpUrlOrNull() != null
 
 private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
-private const val OPENAI_CODEX_HOST = "chatgpt.com"
+private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
 private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
 private const val CLAUDE_OFFICIAL_HOST = "api.anthropic.com"
 private const val V1_SUFFIX = "/v1"
 private const val V1_BETA_SUFFIX = "/v1beta"
 private val OFFICIAL_PROVIDER_HOSTS = setOf(
     OPENAI_OFFICIAL_HOST,
-    OPENAI_CODEX_HOST,
     GOOGLE_OFFICIAL_HOST,
     CLAUDE_OFFICIAL_HOST
 )
-
-internal fun ProviderSetting.OpenAI.supportsChatGPTSubscription(): Boolean {
-    return baseUrl.toHttpUrlOrNull()?.host?.lowercase() in setOf(
-        OPENAI_OFFICIAL_HOST,
-        OPENAI_CODEX_HOST,
-    )
-}
 
 // 标题在上、输入框在下的表单项；secret 为 true 时默认遮住内容，右侧是显示/隐藏按钮
 private fun CardGroupScope.textFieldItem(
@@ -343,208 +314,40 @@ private fun ProviderConfigureOpenAI(
 ) {
     val toaster = LocalToaster.current
     val responseAPIWarning = stringResource(R.string.setting_provider_page_response_api_warning)
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val codexAuthService = koinInject<OpenAICodexAuthService>()
-    var authJob by remember(provider.id) { mutableStateOf<Job?>(null) }
-    var deviceCode by remember(provider.id) { mutableStateOf<OpenAICodexDeviceCode?>(null) }
-    var authError by remember(provider.id) { mutableStateOf<String?>(null) }
-    var signingIn by remember(provider.id) { mutableStateOf(false) }
-    val supportsChatGPTSubscription = provider.supportsChatGPTSubscription()
-    val selectedAuthType = if (supportsChatGPTSubscription) {
-        provider.authType
-    } else {
-        OpenAIAuthType.API_KEY
-    }
-
-    LaunchedEffect(provider.authType, supportsChatGPTSubscription) {
-        if (!supportsChatGPTSubscription && provider.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
-            onEdit(
-                provider.copy(
-                    authType = OpenAIAuthType.API_KEY,
-                    codexCredentials = null,
-                )
-            )
-        }
-    }
 
     CardGroup {
         nameItem(provider, onEdit)
-
-        if (supportsChatGPTSubscription) {
-            formItem(
-                headlineContent = { Text(stringResource(R.string.setting_provider_page_auth_method)) },
-            ) {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    OpenAIAuthType.entries.forEachIndexed { index, authType ->
-                        SegmentedButton(
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = OpenAIAuthType.entries.size,
-                            ),
-                            label = {
-                                Text(
-                                    when (authType) {
-                                        OpenAIAuthType.API_KEY -> stringResource(R.string.setting_provider_page_api_key)
-                                        OpenAIAuthType.CHATGPT_SUBSCRIPTION -> stringResource(R.string.setting_provider_page_chatgpt_subscription)
-                                    }
-                                )
-                            },
-                            selected = provider.authType == authType,
-                            onClick = {
-                                val baseUrl = when {
-                                    authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION -> OPENAI_CODEX_BASE_URL
-                                    provider.baseUrl == OPENAI_CODEX_BASE_URL -> ProviderSetting.OpenAI().baseUrl
-                                    else -> provider.baseUrl
-                                }
-                                onEdit(
-                                    provider.copy(
-                                        authType = authType,
-                                        baseUrl = baseUrl,
-                                        useResponseApi = authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION || provider.useResponseApi,
-                                    )
-                                )
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
-        when (selectedAuthType) {
-            OpenAIAuthType.API_KEY -> {
-                apiKeyItem(provider.apiKey) { onEdit(provider.copy(apiKey = it)) }
-            }
-
-            OpenAIAuthType.CHATGPT_SUBSCRIPTION -> {
-                formItem(
-                    headlineContent = { Text(stringResource(R.string.setting_provider_page_chatgpt_subscription)) },
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.setting_provider_page_chatgpt_subscription_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        val credentials = provider.codexCredentials
-                        if (credentials != null) {
-                            val accountLabel = listOfNotNull(credentials.email, credentials.planType)
-                                .joinToString(" · ")
-                                .ifBlank { stringResource(R.string.setting_provider_page_signed_in) }
-                            Text(
-                                text = accountLabel,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            OutlinedButton(
-                                enabled = !signingIn,
-                                onClick = {
-                                    authJob?.cancel()
-                                    authJob = scope.launch {
-                                        signingIn = true
-                                        authError = null
-                                        try {
-                                            val credentials = codexAuthService.signIn(provider.id) { code ->
-                                                deviceCode = code
-                                                context.getSystemService(ClipboardManager::class.java)
-                                                    ?.setPrimaryClip(
-                                                        ClipData.newPlainText("OpenAI Codex device code", code.userCode)
-                                                    )
-                                                context.openUrl(code.verificationUrl)
-                                            }
-                                            deviceCode = null
-                                            onEdit(
-                                                provider.copy(
-                                                    authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
-                                                    codexCredentials = credentials,
-                                                    baseUrl = OPENAI_CODEX_BASE_URL,
-                                                    useResponseApi = true,
-                                                )
-                                            )
-                                        } catch (error: kotlinx.coroutines.CancellationException) {
-                                            throw error
-                                        } catch (error: Exception) {
-                                            authError = error.message ?: error.javaClass.simpleName
-                                        } finally {
-                                            signingIn = false
-                                            authJob = null
-                                        }
-                                    }
-                                },
-                            ) {
-                                Text(
-                                    stringResource(
-                                        if (signingIn) R.string.setting_provider_page_signing_in
-                                        else R.string.setting_provider_page_sign_in_chatgpt
-                                    )
-                                )
-                            }
-                            if (credentials != null) {
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            codexAuthService.signOut(provider.id)
-                                            onEdit(provider.copy(codexCredentials = null))
-                                        }
-                                    }
-                                ) {
-                                    Text(stringResource(R.string.setting_provider_page_sign_out))
-                                }
-                            }
-                        }
-                        authError?.let { error ->
-                            Text(
-                                text = error,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        apiKeyItem(provider.apiKey) { onEdit(provider.copy(apiKey = it)) }
 
         textFieldItem(
             label = R.string.setting_provider_page_api_base_url,
             value = provider.baseUrl,
             onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
-            enabled = selectedAuthType == OpenAIAuthType.API_KEY,
             isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
-            trailingIcon = if (selectedAuthType == OpenAIAuthType.API_KEY) {
-                resetBaseUrlButton(provider) {
-                    onEdit(provider.copy(baseUrl = provider.defaultBaseUrlForReset()))
-                }
-            } else null,
+            trailingIcon = resetBaseUrlButton(provider) {
+                onEdit(provider.copy(baseUrl = provider.defaultBaseUrlForReset()))
+            },
         )
 
-        if (selectedAuthType == OpenAIAuthType.API_KEY) {
-            textFieldItem(
-                label = R.string.setting_provider_page_api_path,
-                value = if (provider.useResponseApi) provider.responsesPath else provider.chatCompletionsPath,
-                onValueChange = {
-                    onEdit(
-                        if (provider.useResponseApi) {
-                            provider.copy(responsesPath = it.trim())
-                        } else {
-                            provider.copy(chatCompletionsPath = it.trim())
-                        }
-                    )
-                },
-                enabled = !provider.builtIn,
-            )
-        }
+        textFieldItem(
+            label = R.string.setting_provider_page_api_path,
+            value = if (provider.useResponseApi) provider.responsesPath else provider.chatCompletionsPath,
+            onValueChange = {
+                onEdit(
+                    if (provider.useResponseApi) {
+                        provider.copy(responsesPath = it.trim())
+                    } else {
+                        provider.copy(chatCompletionsPath = it.trim())
+                    }
+                )
+            },
+            enabled = !provider.builtIn,
+        )
     }
 
     CardGroup {
         switchItem(
             checked = provider.useResponseApi,
-            enabled = selectedAuthType == OpenAIAuthType.API_KEY,
             onCheckedChange = {
                 onEdit(provider.copy(useResponseApi = it))
                 if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
@@ -557,45 +360,6 @@ private fun ProviderConfigureOpenAI(
             checked = provider.includeHistoryReasoning,
             onCheckedChange = { onEdit(provider.copy(includeHistoryReasoning = it)) },
             headlineContent = { Text(stringResource(R.string.setting_provider_page_include_history_reasoning)) },
-        )
-    }
-
-    deviceCode?.let { code ->
-        AlertDialog(
-            onDismissRequest = {
-                authJob?.cancel()
-                deviceCode = null
-            },
-            title = { Text(stringResource(R.string.setting_provider_page_device_code_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.setting_provider_page_device_code_desc))
-                    Text(
-                        text = code.userCode,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontFamily = JetbrainsMono,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        authJob?.cancel()
-                        deviceCode = null
-                    }
-                ) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        context.openUrl(code.verificationUrl)
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_open_browser))
-                }
-            },
         )
     }
 }

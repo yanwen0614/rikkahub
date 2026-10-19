@@ -22,7 +22,6 @@ import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderQuota
 import me.rerere.ai.provider.ProviderSetting
@@ -52,25 +51,21 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
 private const val TAG = "OpenAIProvider"
-private const val CODEX_MODELS_CLIENT_VERSION = "0.148.0"
 
 class OpenAIProvider(
     private val client: OkHttpClient,
     context: Context? = null,
-    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : Provider<ProviderSetting.OpenAI> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
-    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+    private val authenticator = OpenAIRequestAuthenticator(keyRoulette)
 
     private val chatCompletionsAPI = ChatCompletionsAPI(
         client = client,
         keyRoulette = keyRoulette,
-        codexTokenProvider = codexTokenProvider,
     )
     private val responseAPI = ResponseAPI(
         client = client,
         keyRoulette = keyRoulette,
-        codexTokenProvider = codexTokenProvider,
     )
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
@@ -408,15 +403,7 @@ class OpenAIProvider(
 }
 
 internal fun openAIModelsUrl(providerSetting: ProviderSetting.OpenAI): HttpUrl =
-    "${providerSetting.baseUrl.trimEnd('/')}/models"
-        .toHttpUrl()
-        .newBuilder()
-        .apply {
-            if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
-                addQueryParameter("client_version", CODEX_MODELS_CLIENT_VERSION)
-            }
-        }
-        .build()
+    "${providerSetting.baseUrl.trimEnd('/')}/models".toHttpUrl()
 
 internal fun parseOpenAIModels(body: String): List<Model> {
     val bodyJson = json.parseToJsonElement(body).jsonObject

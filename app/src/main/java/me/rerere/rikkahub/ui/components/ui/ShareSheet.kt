@@ -100,12 +100,7 @@ fun ProviderSetting.encodeForShare(): String {
 
 // 账号凭据等于账号本身，不随分享带出，导入时也不接受
 private fun ProviderSetting.withoutCredential(): ProviderSetting =
-    when (this) {
-        is ProviderSetting.Account -> withCredential(null)
-        // Subscription refresh tokens grant account access and must never leave the device via QR/share.
-        is ProviderSetting.OpenAI -> copy(codexCredentials = null)
-        else -> this
-    }
+    if (this is ProviderSetting.Account) withCredential(null) else this
 
 fun decodeProviderSetting(value: String): ProviderSetting {
     require(value.startsWith("ai-provider:v1:")) { "Invalid provider setting string" }

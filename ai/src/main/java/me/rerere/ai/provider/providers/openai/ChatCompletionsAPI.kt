@@ -77,9 +77,8 @@ private const val TAG = "ChatCompletionsAPI"
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
     keyRoulette: KeyRoulette,
-    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
-    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+    private val authenticator = OpenAIRequestAuthenticator(keyRoulette)
 
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,

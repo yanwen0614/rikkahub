@@ -23,7 +23,6 @@ import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.UsageRecorder
 import me.rerere.rikkahub.data.ai.account.ProviderAccountManager
 import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -277,17 +276,9 @@ val dataSourceModule = module {
     }
 
     single {
-        OpenAICodexAuthService(
-            httpClient = get(),
-            settingsStore = get(),
-        )
-    }
-
-    single {
         ProviderManager(
             client = get(),
             context = get(),
-            openAICodexTokenProvider = get<OpenAICodexAuthService>(),
             accountCredentials = get<ProviderAccountManager>(),
         )
     }
