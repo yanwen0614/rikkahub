@@ -1,4 +1,4 @@
-package me.rerere.ai.util
+package me.rerere.common.http.sse
 
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
@@ -20,7 +20,7 @@ class SSEEventSourceTest {
         var receivedData: String? = null
         var failure: Throwable? = null
         var closed = false
-        val eventSource = SSEEventSource(
+        val eventSource = RealEventSource(
             request = request,
             listener = object : EventSourceListener() {
                 override fun onEvent(
@@ -66,7 +66,7 @@ class SSEEventSourceTest {
     fun `still rejects a missing content type by default`() {
         val request = Request.Builder().url("https://example.com/responses").build()
         var failure: Throwable? = null
-        val eventSource = SSEEventSource(
+        val eventSource = RealEventSource(
             request = request,
             listener = object : EventSourceListener() {
                 override fun onFailure(
@@ -98,7 +98,7 @@ class SSEEventSourceTest {
             .url("https://chatgpt.com/backend-api/codex/responses")
             .build()
         var failure: Throwable? = null
-        val eventSource = SSEEventSource(
+        val eventSource = RealEventSource(
             request = request,
             listener = object : EventSourceListener() {
                 override fun onFailure(

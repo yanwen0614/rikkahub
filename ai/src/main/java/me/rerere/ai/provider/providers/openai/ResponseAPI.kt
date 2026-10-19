@@ -41,8 +41,8 @@ import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.registry.ModelRegistry
-import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.StreamChunkHandler
+import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolMetadata
 import me.rerere.ai.ui.ServerToolProtocol
@@ -53,7 +53,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.common.http.sse.RealEventSource
+import me.rerere.common.http.sse.newEventSource
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
@@ -97,7 +97,7 @@ internal class ResponsesEndpoint(
 
 class ResponseAPI(
     private val client: OkHttpClient,
-    keyRoulette: KeyRoulette = KeyRoulette.default(),
+    private val keyRoulette: KeyRoulette = KeyRoulette.default(),
     codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
     private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
@@ -251,11 +251,7 @@ class ResponseAPI(
             }
         }
 
-        val eventSource = RealEventSource.factory(
-            callFactory = client,
-            allowMissingContentType = true,
-        )
-            .newEventSource(request, listener)
+        val eventSource = client.newEventSource(request, listener, allowMissingContentType = true)
 
         awaitClose {
             println("[awaitClose] 关闭eventSource ")

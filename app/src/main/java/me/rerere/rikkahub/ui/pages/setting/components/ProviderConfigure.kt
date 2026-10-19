@@ -51,6 +51,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.ProviderQuota
 import me.rerere.ai.provider.UsageWindow
 import me.rerere.ai.provider.supportsQuota
+import me.rerere.oauth.CustomTabsOAuthAuthorizationLauncher
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.account.AccountLoginStatus
 import me.rerere.rikkahub.data.ai.account.ChatGPTAuth
@@ -93,6 +94,7 @@ import me.rerere.rikkahub.utils.toMessageTimeString
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlin.math.roundToInt
+import kotlin.reflect.KClass
 import kotlin.time.toJavaInstant
 
 @Composable

@@ -415,7 +415,7 @@ class ResponseApiRequestMessageTest {
                 authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
             ),
             params = createReasoningParams(),
-            stream = false,
+            stream = true,
         )
 
         assertEquals("true", requestBody["stream"]?.jsonPrimitive?.content)

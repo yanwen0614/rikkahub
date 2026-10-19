@@ -1674,8 +1674,6 @@
   <string name="image_preview_saving">Saving…</string>
   <string name="image_preview_saved">Image saved</string>
   <string name="setting_provider_page_account">Account</string>
-  <string name="setting_provider_page_signed_in">Signed in</string>
-  <string name="setting_provider_page_sign_out">Sign out</string>
   <string name="setting_provider_page_waiting_authorization">Waiting for authorization</string>
   <string name="setting_provider_page_waiting_authorization_desc">Finish signing in in the browser, or tap to cancel</string>
   <string name="setting_provider_page_chatgpt_disclaimer">Uses your ChatGPT subscription through the Codex backend. Experimental: OpenAI may change or restrict this at any time.</string>

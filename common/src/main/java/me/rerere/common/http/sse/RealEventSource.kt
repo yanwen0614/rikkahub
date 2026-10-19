@@ -56,6 +56,30 @@ fun Call.Factory.newEventSource(
     }
 }
 
+/**
+ * 发起一个 SSE 请求，与 [newEventSource] 相同但允许指定是否放宽 Content-Type 检查。
+ *
+ * 部分后端（如 ChatGPT Codex）不返回 `Content-Type: text/event-stream`，设置
+ * [allowMissingContentType] 为 true 后，响应没有 Content-Type 或 Content-Type 为
+ * `text/event-stream` 时都接受。
+ */
+fun Call.Factory.newEventSource(
+    request: Request,
+    listener: EventSourceListener,
+    allowMissingContentType: Boolean = false,
+): EventSource {
+    val actualRequest =
+        if (request.header("Accept") == null) {
+            request.newBuilder().addHeader("Accept", "text/event-stream").build()
+        } else {
+            request
+        }
+
+    return RealEventSource(actualRequest, listener, allowMissingContentType).apply {
+        connect(this@newEventSource)
+    }
+}
+
 internal class RealEventSource(
     private val request: Request,
     private val listener: EventSourceListener,
@@ -130,9 +154,10 @@ internal class RealEventSource(
         }
     }
 
-    // 原版要求必须是 text/event-stream；这里没有 Content-Type 也接受
+    // 原版要求必须是 text/event-stream；这里没有 Content-Type 视为非法，
+    // 由 [allowMissingContentType] 参数放宽检查
     private fun ResponseBody.isEventStream(): Boolean {
-        val contentType = contentType() ?: return true
+        val contentType = contentType() ?: return false
         return contentType.type == "text" && contentType.subtype == "event-stream"
     }
 
@@ -161,7 +186,6 @@ internal class RealEventSource(
     override fun onRetryChange(timeMs: Long) {
         // Ignored. We do not auto-retry.
     }
-}
 
     companion object {
         fun factory(
