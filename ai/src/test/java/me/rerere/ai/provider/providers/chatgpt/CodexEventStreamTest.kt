@@ -101,6 +101,7 @@ class CodexEventStreamTest {
                     done.countDown()
                 }
             },
+            allowMissingContentType = true,
         )
         assertTrue("stream did not finish", done.await(10, TimeUnit.SECONDS))
         return Result(text.toString(), failure, finish)
