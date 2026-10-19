@@ -6,14 +6,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -24,9 +24,11 @@ import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderQuota
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.ai.provider.runQuotaQuery
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
@@ -36,7 +38,6 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.common.http.await
-import me.rerere.common.http.getByKey
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -72,7 +73,6 @@ class OpenAIProvider(
         codexTokenProvider = codexTokenProvider,
     )
 
-
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
             val requestBuilder = Request.Builder()
@@ -89,32 +89,10 @@ class OpenAIProvider(
             parseOpenAIModels(response.body.string())
         }
 
-    override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
-        val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
-            providerSetting.balanceOption.apiPath
-        } else {
-            "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
+    override suspend fun getQuota(providerSetting: ProviderSetting.OpenAI): ProviderQuota? =
+        client.runQuotaQuery(providerSetting) {
+            keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
         }
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .headers(providerSetting.mergeCustomHeaders())
-            .get()
-        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to get balance: ${response.code} ${response.body?.string()}")
-        }
-
-        val bodyStr = response.body.string()
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
-        val digitalValue = value.toFloatOrNull()
-        if(digitalValue != null) {
-            "%.2f".format(digitalValue)
-        } else {
-            value
-        }
-    }
 
     override suspend fun streamText(
         providerSetting: ProviderSetting.OpenAI,
@@ -214,7 +192,7 @@ class OpenAIProvider(
                 put("model", params.model.modelId)
                 put("prompt", params.prompt)
                 put("n", params.numOfImages)
-                
+
                 // 只匹配 x.ai 本身及其子域名，避免 "xxx-max.ai" 之类的中转域名被误判
                 val host = providerSetting.baseUrl.toHttpUrlOrNull()?.host?.lowercase()
                 val isGrok = host == "x.ai" || host?.endsWith(".x.ai") == true ||

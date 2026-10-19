@@ -24,9 +24,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.serialization.json.decodeFromJsonElement
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Share03
+import me.rerere.rikkahub.data.datastore.migration.migrateProviderQuotaQuery
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.io.encoding.Base64
 
@@ -91,17 +93,19 @@ fun ProviderSetting.encodeForShare(): String {
         append("ai-provider:")
         append("v1:")
 
-        val withoutModels = this@encodeForShare.copyProvider(models = emptyList())
-        // Subscription refresh tokens grant account access and must never leave the device via QR/share.
-        val shareable = if (withoutModels is ProviderSetting.OpenAI) {
-            withoutModels.copy(codexCredentials = null)
-        } else {
-            withoutModels
-        }
-        val value = JsonInstant.encodeToString(shareable)
+        val value = JsonInstant.encodeToString(this@encodeForShare.copyProvider(models = emptyList()).withoutCredential())
         append(Base64.encode(value.encodeToByteArray()))
     }
 }
+
+// 账号凭据等于账号本身，不随分享带出，导入时也不接受
+private fun ProviderSetting.withoutCredential(): ProviderSetting =
+    when (this) {
+        is ProviderSetting.Account -> withCredential(null)
+        // Subscription refresh tokens grant account access and must never leave the device via QR/share.
+        is ProviderSetting.OpenAI -> copy(codexCredentials = null)
+        else -> this
+    }
 
 fun decodeProviderSetting(value: String): ProviderSetting {
     require(value.startsWith("ai-provider:v1:")) { "Invalid provider setting string" }
@@ -113,7 +117,9 @@ fun decodeProviderSetting(value: String): ProviderSetting {
     val jsonBytes = Base64.decode(base64Str)
     val jsonStr = jsonBytes.decodeToString()
 
-    return JsonInstant.decodeFromString<ProviderSetting>(jsonStr)
+    // 旧版本分享的配置可能还带着 balanceOption
+    val element = migrateProviderQuotaQuery(JsonInstant.parseToJsonElement(jsonStr))
+    return JsonInstant.decodeFromJsonElement<ProviderSetting>(element).withoutCredential()
 }
 
 class ShareSheetState {
