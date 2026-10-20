@@ -901,7 +901,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_signed_in">已登录</string>
   <string name="setting_provider_page_sign_out">退出登录</string>
   <string name="setting_provider_page_api_path">API 路径</string>
-  <string name="setting_provider_page_api_path">API 路径</string>
   <string name="setting_provider_page_avaliable_models">可用模型</string>
   <string name="setting_provider_page_balance_info">获取账户余额</string>
   <string name="setting_provider_page_balance_json_key">结果 JSON 键</string>
