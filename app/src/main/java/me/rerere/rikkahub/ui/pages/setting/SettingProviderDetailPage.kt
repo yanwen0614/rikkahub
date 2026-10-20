@@ -470,19 +470,16 @@ private fun ModelList(
     onUpdateProvider: (ProviderSetting) -> Unit
 ) {
     val providerManager = koinInject<ProviderManager>()
-    var modelListError by remember(providerSetting) { mutableStateOf<String?>(null) }
     val modelList by produceState(emptyList(), providerSetting) {
-        modelListError = null
-        value = runCatching {
+        runCatching {
             println("loading models...")
-            providerManager.getProviderByType(providerSetting)
+            value = providerManager.getProviderByType(providerSetting)
                 .listModels(providerSetting)
                 .sortedBy { it.modelId }
                 .toList()
         }.onFailure {
-            modelListError = it.message ?: it.javaClass.simpleName
             it.printStackTrace()
-        }.getOrDefault(emptyList())
+        }
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
@@ -540,7 +537,6 @@ private fun ModelList(
         ) {
             AddModelButton(
                 models = modelList,
-                modelListError = modelListError,
                 selectedModels = providerSetting.models,
                 onAddModel = {
                     onUpdateProvider(providerSetting.addModel(it))
@@ -721,7 +717,6 @@ private fun ModelSettingsForm(
 @Composable
 private fun AddModelButton(
     models: List<Model>,
-    modelListError: String?,
     selectedModels: List<Model>,
     expanded: Boolean,
     onAddModel: (Model) -> Unit,
@@ -740,7 +735,6 @@ private fun AddModelButton(
     ) {
         ModelPicker(
             models = models,
-            modelListError = modelListError,
             selectedModels = selectedModels,
             onModelSelected = { model ->
                 val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId)
@@ -885,7 +879,6 @@ private fun AddModelButton(
 @Composable
 private fun ModelPicker(
     models: List<Model>,
-    modelListError: String?,
     selectedModels: List<Model>,
     onModelSelected: (Model) -> Unit,
     onModelDeselected: (Model) -> Unit,
@@ -951,15 +944,6 @@ private fun ModelPicker(
                             ) else stringResource(R.string.setting_provider_page_deselect_models)
                         )
                     }
-                }
-
-                if (models.isEmpty() && modelListError != null) {
-                    Text(
-                        text = modelListError,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    )
                 }
 
                 LazyColumn(

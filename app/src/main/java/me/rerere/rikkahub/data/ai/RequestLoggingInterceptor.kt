@@ -16,14 +16,10 @@ class RequestLoggingInterceptor : Interceptor {
         val startTime = System.currentTimeMillis()
 
         val requestHeaders = request.headers.toMap()
-        val requestBody = if (request.url.host == OPENAI_AUTH_HOST) {
-            REDACTED
-        } else {
-            request.body?.let { body ->
-                val buffer = Buffer()
-                body.writeTo(buffer)
-                buffer.readUtf8()
-            }
+        val requestBody = request.body?.let { body ->
+            val buffer = Buffer()
+            body.writeTo(buffer)
+            buffer.readUtf8()
         }
 
         val response: Response
@@ -68,20 +64,11 @@ class RequestLoggingInterceptor : Interceptor {
 
     private fun okhttp3.Headers.toMap(): Map<String, String> {
         return names().associateWith { name ->
-            if (name.lowercase() in SENSITIVE_HEADERS) REDACTED else get(name) ?: ""
+            if (name.equals("Proxy-Authorization", ignoreCase = true)) {
+                "██"
+            } else {
+                get(name) ?: ""
+            }
         }
-    }
-
-    private companion object {
-        const val OPENAI_AUTH_HOST = "auth.openai.com"
-        const val REDACTED = "[REDACTED]"
-        val SENSITIVE_HEADERS = setOf(
-            "authorization",
-            "proxy-authorization",
-            "x-api-key",
-            "cookie",
-            "set-cookie",
-            "chatgpt-account-id",
-        )
     }
 }

@@ -29,7 +29,6 @@ class RealEventSourceTest {
         body: String,
         contentType: MediaType?,
         code: Int = 200,
-        allowMissingContentType: Boolean = false,
     ): Recorded {
         var accept: String? = null
         val client = OkHttpClient.Builder()
@@ -69,7 +68,6 @@ class RealEventSourceTest {
                     done.countDown()
                 }
             },
-            allowMissingContentType = allowMissingContentType,
         )
         assertTrue("stream did not finish", done.await(10, TimeUnit.SECONDS))
         return Recorded(events, failure, failureBody, failureCode, accept)
@@ -97,8 +95,8 @@ class RealEventSourceTest {
     }
 
     @Test
-    fun `treats missing content type as event stream when enabled`() {
-        val result = stream(sse, contentType = null, allowMissingContentType = true)
+    fun `treats missing content type as event stream`() {
+        val result = stream(sse, contentType = null)
 
         assertNull(result.failure)
         assertEquals(2, result.events.size)
