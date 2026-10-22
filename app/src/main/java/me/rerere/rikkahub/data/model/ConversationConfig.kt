@@ -29,11 +29,10 @@ data class ConversationConfig(
 )
 
 // 内置搜索是模型的开关，不在助手上，由调用方另行填入
-internal fun Assistant.toConversationConfig(builtInSearch: Boolean = false) = ConversationConfig(
+private fun Assistant.toConversationConfig() = ConversationConfig(
     chatModelId = chatModelId,
     reasoningLevel = reasoningLevel,
     enableWebSearch = enableWebSearch,
-    builtInSearch = builtInSearch,
     mcpServers = mcpServers,
     workspaceId = workspaceId,
     enabledSkills = enabledSkills,
@@ -56,30 +55,6 @@ fun Assistant.withConversation(conversation: Conversation): Assistant {
         lorebookIds = conversation.lorebookIds,
     )
 }
-
-/** 用子代理快照覆盖助手的字段，用于子会话的运行时视角。 */
-fun Assistant.withSubAgent(snapshot: SubAgentSnapshot): Assistant = copy(
-    name = snapshot.name,
-    avatar = Avatar.Emoji(snapshot.icon),
-    useAssistantAvatar = true,
-    systemPrompt = snapshot.systemPrompt,
-    chatModelId = snapshot.chatModelId,
-    temperature = snapshot.temperature,
-    topP = snapshot.topP,
-    maxTokens = snapshot.maxTokens,
-    reasoningLevel = snapshot.reasoningLevel,
-    contextMessageLimit = snapshot.contextMessageLimit,
-    localTools = snapshot.localTools,
-    enabledSkills = snapshot.enabledSkills,
-    mcpServers = snapshot.mcpServers,
-    enableWebSearch = snapshot.enableWebSearch,
-    workspaceId = snapshot.workspaceId,
-    enableMemory = snapshot.enableMemory,
-    subAgents = emptyList(),
-    presetMessages = emptyList(),
-    quickMessageIds = emptySet(),
-    enableRecentChatsReference = false,
-)
 
 /** 聊天页改动助手后留在会话上的部分，[updated] 是会话视角下改动后的助手。 */
 fun Conversation.withAssistantUpdate(updated: Assistant, settings: Settings): Conversation {
@@ -122,9 +97,7 @@ fun Settings.getStoredAssistantOf(conversation: Conversation): Assistant =
 
 /** 会话所属的助手（会话视角）。 */
 fun Settings.getAssistantOf(conversation: Conversation): Assistant {
-    val stored = getStoredAssistantOf(conversation)
-    val withSub = conversation.subAgentSnapshot?.let { stored.withSubAgent(it) } ?: stored
-    val assistant = withSub.withConversation(conversation)
+    val assistant = getStoredAssistantOf(conversation).withConversation(conversation)
     if (conversation.config == null) return assistant
     // 助手自身的失效引用在读取设置时已清理，会话上固定的这份在这里滤掉
     return assistant.copy(
@@ -137,10 +110,7 @@ fun Settings.getAssistantOf(conversation: Conversation): Assistant {
 
 /** 会话使用的聊天模型；会话开始后内置搜索以会话上固定的开关为准。 */
 fun Settings.getChatModelOf(conversation: Conversation): Model? {
-    val effective = getAssistantOf(conversation)
-    val assistantModel = findModelById(effective.chatModelId)
-        ?: findModelById(getStoredAssistantOf(conversation).chatModelId)
-        ?: findModelById(chatModelId)
+    val assistantModel = findModelById(getStoredAssistantOf(conversation).chatModelId ?: chatModelId)
     val config = conversation.config ?: return assistantModel
     // 固定的模型被删除后退回助手当前的模型，内置搜索也跟随该模型自身的开关
     val model = findModelById(config.chatModelId) ?: return assistantModel

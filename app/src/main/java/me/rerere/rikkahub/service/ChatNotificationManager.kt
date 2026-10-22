@@ -22,7 +22,6 @@ import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
-import me.rerere.rikkahub.data.event.GenerationOrigin
 import me.rerere.rikkahub.utils.cancelNotification
 import me.rerere.rikkahub.utils.sendNotification
 import java.util.concurrent.ConcurrentHashMap
@@ -70,7 +69,6 @@ class ChatNotificationManager(
     }
 
     private fun handleGenerationUpdate(event: AppEvent.ChatGenerationUpdate) {
-        if (event.origin == GenerationOrigin.SUB_AGENT) return
         if (isForeground.value) return
         val displaySetting = settingsStore.settingsFlow.value.displaySetting
         if (!displaySetting.enableNotificationOnMessageGeneration) return
@@ -85,7 +83,6 @@ class ChatNotificationManager(
     }
 
     private fun handleGenerationEnded(event: AppEvent.ChatGenerationEnded) {
-        if (event.origin == GenerationOrigin.SUB_AGENT) return
         cancelLiveUpdateNotification(event.conversationId)
 
         val contentPreview = event.contentPreview ?: return

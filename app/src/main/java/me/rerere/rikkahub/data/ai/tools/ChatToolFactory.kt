@@ -7,17 +7,16 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.ai.SubAgentRunner
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.skills.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.repository.memoryId
-import me.rerere.rikkahub.data.skills.SkillManager
 import me.rerere.workspace.WorkspaceShellStatus
 import java.io.File
 import kotlin.uuid.Uuid
@@ -51,9 +50,6 @@ class ChatToolFactory(
         assistant: Assistant,
         model: Model,
         workspaceCwd: String? = null,
-        conversationId: Uuid,
-        agentDepth: Int = 0,
-        subAgentRunner: SubAgentRunner? = null,
     ): List<Tool> {
         val workspaceTools = createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd)
         val tools = buildList {
@@ -96,25 +92,9 @@ class ChatToolFactory(
                     )
                 )
             }
-
-            // Sub-agent tool (only at depth 0 when sub-agents configured)
-            if (agentDepth == 0 && assistant.subAgents.isNotEmpty() && subAgentRunner != null) {
-                add(createSubAgentTool(assistant, conversationId, subAgentRunner))
-            }
         }
         // 过长的输出存成文件让模型用 shell 按需读取；没有 shell 时模型读不到文件，只能原样返回
-        val processed = if (workspaceTools.isEmpty()) tools else tools.map(::withOutputTruncation)
-        return if (agentDepth > 0) {
-            processed.map { tool ->
-                if (tool.name == "ask_user") {
-                    tool.copy(execute = { listOf(UIMessagePart.Text("ask_user is not available for sub-agents")) })
-                } else {
-                    tool.copy(needsApproval = { false })
-                }
-            }
-        } else {
-            processed
-        }
+        return if (workspaceTools.isEmpty()) tools else tools.map(::withOutputTruncation)
     }
 
     private fun withOutputTruncation(tool: Tool): Tool {

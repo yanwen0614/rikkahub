@@ -94,13 +94,10 @@ class ChatVM(
         // 初始化对话
         viewModelScope.launch {
             chatService.initializeConversation(_conversationId)
-
-            // 只有当会话不是子代理子会话时才记住最后访问的会话 ID
-            val conv = conversation.value
-            if (conv.parentId == null) {
-                context.writeStringPreference("lastConversationId", _conversationId.toString())
-            }
         }
+
+        // 记住对话ID, 方便下次启动恢复
+        context.writeStringPreference("lastConversationId", _conversationId.toString())
     }
 
     override fun onCleared() {

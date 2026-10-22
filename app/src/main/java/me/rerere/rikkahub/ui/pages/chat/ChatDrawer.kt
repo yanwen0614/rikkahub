@@ -141,14 +141,6 @@ fun ChatDrawerContent(
     val conversationJobs by vm.conversationJobs.collectAsStateWithLifecycle(
         initialValue = emptyMap(),
     )
-    val expandedIds by drawerVm.expandedIds.collectAsStateWithLifecycle()
-
-    // 如果正在查看子会话，自动展开父会话
-    LaunchedEffect(current.parentId) {
-        current.parentId?.let { parentId ->
-            drawerVm.expand(parentId)
-        }
-    }
 
     // 昵称编辑状态
     val nicknameEditState = useEditState<String> { newNickname ->
@@ -322,18 +314,12 @@ fun ChatDrawerContent(
                 conversations = conversations,
                 conversationJobs = conversationJobs.keys,
                 listState = conversationListState,
-                expandedIds = expandedIds,
                 header = if (scrollableHeader) drawerHeader else null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
                 onClick = {
                     navigateToChatPage(navController, it.id)
-                },
-                onToggleExpand = drawerVm::toggleExpand,
-                subConversationsProvider = drawerVm::subConversations,
-                onChildClick = { childId ->
-                    navController.navigate(Screen.Chat(id = childId.toString()))
                 },
                 onRegenerateTitle = {
                     vm.generateTitle(it, true)
@@ -386,10 +372,8 @@ fun ChatDrawerContent(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 onClickSetting = {
-                    if (current.subAgentSnapshot == null) {
-                        val currentAssistantId = settings.assistantId
-                        navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
-                    }
+                    val currentAssistantId = settings.assistantId
+                    navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
                 }
             )
 

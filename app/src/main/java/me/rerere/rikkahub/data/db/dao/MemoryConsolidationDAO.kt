@@ -18,7 +18,6 @@ interface MemoryConsolidationDAO {
         "SELECT c.id FROM conversationentity AS c " +
             "LEFT JOIN memory_consolidation AS m ON m.conversation_id = c.id " +
             "WHERE c.assistant_id IN (:assistantIds) " +
-            "AND c.parent_id = '' " +
             "AND c.update_at >= :since " +
             "AND c.update_at > COALESCE(m.consolidated_at, 0) " +
             "ORDER BY c.update_at DESC LIMIT :limit"
@@ -30,7 +29,6 @@ interface MemoryConsolidationDAO {
         "SELECT DISTINCT c.assistant_id FROM conversationentity AS c " +
             "LEFT JOIN memory_consolidation AS m ON m.conversation_id = c.id " +
             "WHERE c.assistant_id IN (:assistantIds) " +
-            "AND c.parent_id = '' " +
             "AND c.update_at >= :since " +
             "AND c.update_at > COALESCE(m.consolidated_at, 0)"
     )

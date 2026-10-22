@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.service
 
 import android.app.Application
-import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.core.net.toUri
@@ -13,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.completeWith
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,14 +22,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.agent.AgentEvent
 import me.rerere.ai.agent.AgentFinishReason
-import me.rerere.ai.agent.AgentHooks
-import me.rerere.ai.agent.AgentRequest
 import me.rerere.ai.agent.RetryAttempt
 import me.rerere.ai.agent.runAgent
 import me.rerere.ai.core.MessageRole
@@ -48,27 +42,18 @@ import me.rerere.rikkahub.data.ai.ChatRequestFactory
 import me.rerere.rikkahub.data.ai.ChatTurnContext
 import me.rerere.rikkahub.data.ai.ConversationMetaGenerator
 import me.rerere.rikkahub.data.ai.MemoryConsolidationScheduler
-import me.rerere.rikkahub.data.ai.SubAgentRequest
-import me.rerere.rikkahub.data.ai.SubAgentResult
-import me.rerere.rikkahub.data.ai.SubAgentRunner
-import me.rerere.rikkahub.data.ai.SubAgentRunnerHolder
-import me.rerere.rikkahub.data.ai.SubAgentStatus
 import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
-import me.rerere.rikkahub.data.event.GenerationOrigin
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.model.SubAgentSnapshot
 import me.rerere.rikkahub.data.model.bindConfig
 import me.rerere.rikkahub.data.model.cancelInterruptedTools
 import me.rerere.rikkahub.data.model.deleteMessage
@@ -82,13 +67,10 @@ import me.rerere.rikkahub.data.model.insertContextCheckpoint
 import me.rerere.rikkahub.data.model.isAwaitingToolApproval
 import me.rerere.rikkahub.data.model.localFileUrls
 import me.rerere.rikkahub.data.model.replaceUserRegexes
-import me.rerere.rikkahub.data.model.resolve
 import me.rerere.rikkahub.data.model.selectBranch
-import me.rerere.rikkahub.data.model.toConversationConfig
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.model.withAssistantUpdate
 import me.rerere.rikkahub.data.model.withNodeFavorite
-import me.rerere.rikkahub.data.model.withSubAgent
 import me.rerere.rikkahub.data.model.withToolApproval
 import me.rerere.rikkahub.data.model.withTranslation
 import me.rerere.rikkahub.data.model.withoutConversationFields
@@ -132,14 +114,7 @@ class ChatService(
     val mcpManager: McpManager,
     private val filesManager: FilesManager,
     private val folderRepository: FolderRepository,
-    private val subAgentRunnerHolder: SubAgentRunnerHolder,
 ) {
-    init {
-        subAgentRunnerHolder.runner = object : SubAgentRunner {
-            override suspend fun run(request: SubAgentRequest) = runSubAgent(request)
-        }
-    }
-
     /** 一轮生成的结果 */
     private sealed interface TurnResult {
         data class Finished(val reason: AgentFinishReason) : TurnResult
@@ -588,63 +563,6 @@ class ChatService(
     // ---- 生成回复 ----
 
     /**
-     * 运行 Agent pipeline：收集事件、更新会话状态并发送 [AppEvent]。
-     *
-     * [origin] 用于区分主对话与子代理生成，下游消费方可据此决定是否发送通知等。
-     */
-    private suspend fun runAgentPipeline(
-        session: ConversationSession,
-        request: AgentRequest,
-        hooks: AgentHooks,
-        replyNodeId: Uuid,
-        senderName: String,
-        origin: GenerationOrigin,
-    ): AgentFinishReason {
-        var finishReason: AgentFinishReason? = null
-        try {
-            runAgent(request, hooks).flowOn(Dispatchers.IO).collect { event ->
-                when (event) {
-                    is AgentEvent.MessageUpdated -> {
-                        session.processingStatus.value = null
-                        session.update { it.upsertMessage(replyNodeId, event.message) }
-                        appEventBus.tryEmit(
-                            AppEvent.ChatGenerationUpdate(
-                                conversationId = session.id,
-                                lastMessage = event.message,
-                                senderName = senderName,
-                                origin = origin,
-                            )
-                        )
-                    }
-                    is AgentEvent.Retrying -> {
-                        logRetry(event.attempt)
-                        session.processingStatus.value = retryStatus(event.attempt)
-                    }
-                    is AgentEvent.Finished -> {
-                        Log.i(TAG, "runAgentPipeline: finished (${event.reason})")
-                        finishReason = event.reason
-                    }
-                }
-            }
-        } finally {
-            withContext(NonCancellable) {
-                session.processingStatus.value = null
-                val finished = session.finishGeneration()
-                appEventBus.emit(
-                    AppEvent.ChatGenerationEnded(
-                        conversationId = session.id,
-                        senderName = senderName,
-                        contentPreview = finished.currentMessages.lastOrNull()
-                            ?.toText()?.take(50)?.trim() ?: "",
-                        origin = origin,
-                    )
-                )
-            }
-        }
-        return checkNotNull(finishReason)
-    }
-
-    /**
      * 生成一轮回复：请求模型、执行工具，直到模型不再调用工具、有工具需要审批或达到步数上限。
      *
      * 默认接着当前分支的末尾回复；[regenerateNodeId] 不为空时只发送这个节点之前的消息，回复作为它的新分支。
@@ -689,15 +607,50 @@ class ChatService(
             }
 
             val (request, hooks) = requestFactory.createAgent(turn, history, session.processingStatus)
-            val reason = runAgentPipeline(
-                session = session,
-                request = request,
-                hooks = hooks,
-                replyNodeId = replyNodeId,
-                senderName = senderName,
-                origin = GenerationOrigin.CHAT,
-            )
+            var finishReason: AgentFinishReason? = null
+            try {
+                runAgent(request, hooks).flowOn(Dispatchers.IO).collect { event ->
+                    when (event) {
+                        is AgentEvent.MessageUpdated -> {
+                            // 生成过程中只有网络重试的提示会留着，收到新内容说明重试已经成功
+                            session.processingStatus.value = null
+                            session.update { it.upsertMessage(replyNodeId, event.message) }
+                            // 通知等边缘副作用由 ChatNotificationManager 消费；
+                            // tryEmit 不挂起，事件丢失只影响单次通知更新，不能反压生成链
+                            appEventBus.tryEmit(
+                                AppEvent.ChatGenerationUpdate(conversationId, event.message, senderName)
+                            )
+                        }
 
+                        is AgentEvent.Retrying -> {
+                            logRetry(event.attempt)
+                            session.processingStatus.value = retryStatus(event.attempt)
+                        }
+
+                        is AgentEvent.Finished -> {
+                            Log.i(TAG, "runTurn: finished (${event.reason})")
+                            finishReason = event.reason
+                        }
+                    }
+                }
+            } finally {
+                withContext(NonCancellable) {
+                    session.processingStatus.value = null
+                    // 可能被取消了，或者意外结束，兜底保存
+                    val finished = session.finishGeneration()
+                    // 生成结束：取消 Live Update 通知，后台时发送完成通知
+                    appEventBus.emit(
+                        AppEvent.ChatGenerationEnded(
+                            conversationId = conversationId,
+                            senderName = senderName,
+                            contentPreview = finished.currentMessages.lastOrNull()
+                                ?.toText()?.take(50)?.trim() ?: "",
+                        )
+                    )
+                }
+            }
+
+            val reason = checkNotNull(finishReason)
             // 等待审批时这一轮还没结束，标题、建议和记忆整理等审批之后再做
             if (reason !is AgentFinishReason.AwaitingApproval) {
                 sessionManager.launchWithSession(conversationId) { generateTitle(conversationId) }
@@ -728,147 +681,6 @@ class ChatService(
             return TurnResult.Failed
         }
     }
-
-    suspend fun runSubAgent(request: SubAgentRequest): SubAgentResult {
-        val settings = settingsStore.awaitLoaded()
-        val parentSession = sessionManager.get(request.parentConversationId)
-            ?: return failed(request, "Parent conversation is not loaded")
-        val parent = parentSession.state.value
-        val parentAssistant = settings.getStoredAssistantOf(parent)
-
-        // 1. Find or create sub-session
-        val (subConversation, subSession, snapshot) = if (request.subSessionId != null) {
-            val existing = conversationRepo.getConversationById(request.subSessionId)
-                ?: return failed(request, "Sub-session not found")
-            if (existing.parentId != parent.id) {
-                return failed(request, "Sub-session does not belong to this conversation")
-            }
-            val existingSnapshot = existing.subAgentSnapshot
-                ?: return failed(request, "Not a sub-agent session")
-            val session = sessionManager.getOrCreate(existing.id)
-            session.initialize(
-                load = { conversationRepo.getConversationById(existing.id) },
-                create = { existing },
-            )
-            Triple(existing, session, existingSnapshot)
-        } else {
-            val config = parentAssistant.subAgents.find { it.name == request.subAgentName }
-                ?: return failed(request, "Sub-agent not found: ${request.subAgentName}")
-            val snapshot = config.resolve(parentAssistant, settings)
-            val effective = parentAssistant.withSubAgent(snapshot)
-            val model = settings.findModelById(effective.chatModelId)
-                ?: settings.findModelById(settings.chatModelId)
-            val id = Uuid.random()
-            val conversation = Conversation.newSubAgent(
-                id = id,
-                parent = parent,
-                snapshot = snapshot,
-                task = request.task,
-                title = "${snapshot.icon} ${snapshot.name}：${request.task.lineSequence().first().take(30)}",
-                config = effective.toConversationConfig(
-                    builtInSearch = model?.tools?.contains(BuiltInTools.Search) == true,
-                ),
-                workspaceCwd = if (snapshot.workspaceId == parentAssistant.workspaceId) {
-                    parent.workspaceCwd
-                } else {
-                    null
-                },
-                modeInjectionIds = effective.modeInjectionIds,
-                lorebookIds = effective.lorebookIds,
-            )
-            val session = sessionManager.getOrCreate(id)
-            session.initialize(load = { null }, create = { conversation })
-            Triple(conversation, session, snapshot)
-        }
-
-        // 2. Execute sub-session
-        return sessionManager.withSession(subSession.id) { session ->
-            val subJob = Job(parent = currentCoroutineContext().job)
-            if (!session.beginGeneration(subJob)) {
-                subJob.cancel()
-                return@withSession failed(request, "Sub-session is already generating")
-            }
-            val startedAt = SystemClock.elapsedRealtime()
-            try {
-                withContext(subJob) {
-                    if (request.subSessionId != null) {
-                        session.update { current ->
-                            current.copy(
-                                messageNodes = current.messageNodes + MessageNode(
-                                    messages = listOf(UIMessage.user(request.task))
-                                )
-                            )
-                        }
-                    }
-                    val conversation = session.update {
-                        it.copy(chatSuggestions = emptyList()).withoutUnresumableToolCalls()
-                    }
-                    val turn = requestFactory.createContext(settings, conversation)
-                    val nodes = conversation.messageNodes
-                    val history = conversation.currentMessages
-                    val replyNodeId = when {
-                        history.lastOrNull()?.role == MessageRole.ASSISTANT -> nodes[history.lastIndex].id
-                        else -> Uuid.random()
-                    }
-                    val (agentRequest, hooks) =
-                        requestFactory.createAgent(turn, history, session.processingStatus)
-                    val reason = runAgentPipeline(
-                        session = session,
-                        request = agentRequest,
-                        hooks = hooks,
-                        replyNodeId = replyNodeId,
-                        senderName = snapshot.name,
-                        origin = GenerationOrigin.SUB_AGENT,
-                    )
-                    val summary = session.state.value.currentMessages
-                        .lastOrNull { it.role == MessageRole.ASSISTANT }
-                        ?.toText()?.trim().orEmpty()
-                    SubAgentResult(
-                        status = if (reason is AgentFinishReason.AwaitingApproval) {
-                            SubAgentStatus.AWAITING_APPROVAL
-                        } else {
-                            SubAgentStatus.COMPLETED
-                        },
-                        subSessionId = subSession.id,
-                        name = snapshot.name,
-                        icon = snapshot.icon,
-                        summary = summary,
-                        durationMs = SystemClock.elapsedRealtime() - startedAt,
-                    )
-                }
-            } catch (e: CancellationException) {
-                if (!currentCoroutineContext().isActive) throw e
-                SubAgentResult(
-                    status = SubAgentStatus.CANCELLED,
-                    subSessionId = subSession.id,
-                    name = snapshot.name,
-                    icon = snapshot.icon,
-                    summary = "Sub-agent was cancelled.",
-                    durationMs = SystemClock.elapsedRealtime() - startedAt,
-                )
-            } catch (e: Exception) {
-                failed(request, e.message ?: e.javaClass.simpleName, subSession.id)
-            } finally {
-                subJob.complete()
-            }
-        }
-    }
-
-    private fun failed(
-        request: SubAgentRequest,
-        message: String,
-        subSessionId: Uuid? = null,
-    ) = SubAgentResult(
-        status = SubAgentStatus.FAILED,
-        subSessionId = subSessionId,
-        name = request.subAgentName,
-        summary = message,
-    )
-
-    data class DeletedConversationTree(
-        val root: Conversation,
-        val children: List<Conversation>,
-    )
 
     // 模型不支持工具调用时，搜索和 MCP 工具都不会生效，提醒一下
     private fun warnIfToolsUnavailable(turn: ChatTurnContext, conversationId: Uuid) {
@@ -1256,10 +1068,6 @@ class ChatService(
      * 还停在这个会话上的页面看到的是空会话，之后再发消息会新建记录，不会写回已删除的那条。
      */
     suspend fun deleteConversation(conversationId: Uuid) {
-        // Recursively delete sub-conversations first
-        for (childId in conversationRepo.getSubConversationIds(conversationId)) {
-            deleteConversation(childId)
-        }
         val session = sessionManager.getOrCreate(conversationId)
         discardQueuedMessages(session)
         session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
@@ -1268,17 +1076,6 @@ class ChatService(
             previous?.let { filesManager.deleteChatFiles(it.files) }
         }
         sessionManager.removeIfIdle(session)
-    }
-
-    /** Delete a conversation tree (root + all children), returning the deleted state for undo. */
-    suspend fun deleteConversationTree(conversationId: Uuid): DeletedConversationTree {
-        val root = conversationRepo.getConversationById(conversationId)
-            ?: newConversation(conversationId)
-        val children = conversationRepo.getSubConversationIds(conversationId).mapNotNull {
-            conversationRepo.getConversationById(it)
-        }
-        deleteConversation(conversationId)
-        return DeletedConversationTree(root = root, children = children)
     }
 
     /** 撤销删除：写回删除前的会话，还停在这个会话上的页面也一并换回 */

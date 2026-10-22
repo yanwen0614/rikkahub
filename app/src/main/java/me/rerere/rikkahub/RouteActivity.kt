@@ -88,8 +88,6 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMemoryPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
-import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantSubAgentsPage
-import me.rerere.rikkahub.ui.pages.assistant.detail.SubAgentDetailPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
@@ -409,17 +407,6 @@ class RouteActivity : ComponentActivity() {
                                 AssistantExtensionsPage(key.id)
                             }
 
-                            entry<Screen.AssistantSubAgents> { key ->
-                                AssistantSubAgentsPage(assistantId = Uuid.parse(key.id))
-                            }
-
-                            entry<Screen.AssistantSubAgentDetail> { key ->
-                                SubAgentDetailPage(
-                                    assistantId = Uuid.parse(key.assistantId),
-                                    subAgentId = key.subAgentId?.let(Uuid::parse),
-                                )
-                            }
-
                             entry<Screen.Translator> {
                                 TranslatorPage()
                             }
@@ -696,12 +683,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class AssistantInjections(val id: String) : Screen
-
-    @Serializable
-    data class AssistantSubAgents(val id: String) : Screen
-
-    @Serializable
-    data class AssistantSubAgentDetail(val assistantId: String, val subAgentId: String? = null) : Screen
 
     @Serializable
     data object Translator : Screen
