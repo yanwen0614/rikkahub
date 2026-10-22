@@ -10,6 +10,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.skills.SkillFrontmatterParser
 import me.rerere.rikkahub.data.skills.SkillMetadata
 import me.rerere.rikkahub.data.skills.SkillPaths
+import me.rerere.rikkahub.utils.escapeXml
 
 // 与 Agent Skills 规范的 description 上限一致
 private const val MAX_SKILL_DESCRIPTION_LENGTH = 1024
@@ -31,13 +32,19 @@ fun createSkillTools(
             systemPrompt = { _, _ ->
                 buildString {
                     appendLine("**Skills**")
-                    appendLine("You have access to the following skills. Use the `use_skill` tool to load a skill's instructions when the user's request matches.")
+                    appendLine(
+                        "You have access to the following skills. Use the `use_skill` tool to load a skill's instructions when the user's request matches."
+                    )
                     appendLine("<available_skills>")
                     available.forEach { skill ->
                         appendLine("  <skill>")
                         // 技能可能来自第三方导入，转义并限长，防止 name/description 闭合标签注入任意系统提示
                         appendLine("    <name>${skill.name.escapeXml()}</name>")
-                        appendLine("    <description>${skill.description.take(MAX_SKILL_DESCRIPTION_LENGTH).escapeXml()}</description>")
+                        appendLine(
+                            "    <description>${skill.description.take(
+                                MAX_SKILL_DESCRIPTION_LENGTH
+                            ).escapeXml()}</description>"
+                        )
                         appendLine("  </skill>")
                     }
                     append("</available_skills>")
@@ -82,15 +89,4 @@ fun createSkillTools(
             }
         )
     )
-}
-
-private fun String.escapeXml(): String = buildString(length) {
-    for (c in this@escapeXml) {
-        when (c) {
-            '&' -> append("&amp;")
-            '<' -> append("&lt;")
-            '>' -> append("&gt;")
-            else -> append(c)
-        }
-    }
 }

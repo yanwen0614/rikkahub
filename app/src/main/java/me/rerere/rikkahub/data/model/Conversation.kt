@@ -36,6 +36,15 @@ data class Conversation(
     val workspaceCwd: String? = null,
     // 所属文件夹（助手内分组），null 表示未归入任何文件夹
     val folderId: Uuid? = null,
+    // 父会话 ID，非空表示此会话是子代理会话
+    val parentId: Uuid? = null,
+    // 子代理配置 ID（SubAgentConfig.id），用于关联历史子会话
+    val subAgentConfigId: Uuid? = null,
+    // 子代理配置快照，创建时物化的配置副本
+    val subAgentSnapshot: SubAgentSnapshot? = null,
+    // 子会话数量（仅顶层会话有效）
+    @Transient
+    val subConversationCount: Int = 0,
     @Transient
     val newConversation: Boolean = false
 ) {
@@ -122,6 +131,32 @@ data class Conversation(
             assistantId = assistantId,
             messageNodes = messages,
             newConversation = newConversation,
+        )
+
+        fun newSubAgent(
+            id: Uuid = Uuid.random(),
+            parent: Conversation,
+            snapshot: SubAgentSnapshot,
+            task: String,
+            title: String,
+            config: ConversationConfig,
+            workspaceCwd: String?,
+            modeInjectionIds: Set<Uuid>,
+            lorebookIds: Set<Uuid>,
+        ): Conversation = Conversation(
+            id = id,
+            assistantId = parent.assistantId,
+            title = title,
+            messageNodes = listOf(
+                MessageNode(messages = listOf(UIMessage.user(task)))
+            ),
+            parentId = parent.id,
+            subAgentConfigId = snapshot.configId,
+            subAgentSnapshot = snapshot,
+            config = config,
+            workspaceCwd = workspaceCwd,
+            modeInjectionIds = modeInjectionIds,
+            lorebookIds = lorebookIds,
         )
     }
 }

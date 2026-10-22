@@ -115,6 +115,9 @@ class ChatRequestFactory(
                 assistant = assistant,
                 model = model,
                 workspaceCwd = conversation.workspaceCwd,
+                conversationId = conversation.id,
+                agentDepth = if (conversation.parentId != null) 1 else 0,
+                subAgentRunner = null,
             ),
         )
     }

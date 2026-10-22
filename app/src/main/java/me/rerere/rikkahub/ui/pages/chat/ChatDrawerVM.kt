@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.MemoryConsolidationScheduler
@@ -41,7 +42,7 @@ import kotlin.uuid.Uuid
 class ChatDrawerVM(
     private val context: Application,
     private val settingsStore: SettingsStore,
-    conversationRepo: ConversationRepository,
+    private val conversationRepo: ConversationRepository,
     private val folderRepo: FolderRepository,
     private val chatService: ChatService,
     private val memoryConsolidationScheduler: MemoryConsolidationScheduler,
@@ -177,6 +178,29 @@ class ChatDrawerVM(
             // 经 ChatService 移动：活跃会话会先同步内存态，避免后续整对象保存覆盖 folder_id
             chatService.moveConversationToFolder(conversationId, folderId)
         }
+    }
+
+    // ---- Sub-agent drawer expansion ----
+
+    private val _expandedIds = MutableStateFlow<Set<Uuid>>(emptySet())
+    val expandedIds: StateFlow<Set<Uuid>> = _expandedIds.asStateFlow()
+    private val childFlows = mutableMapOf<Uuid, Flow<List<Conversation>>>()
+
+    fun subConversations(parentId: Uuid): Flow<List<Conversation>> =
+        childFlows.getOrPut(parentId) { conversationRepo.getSubConversations(parentId) }
+
+    fun toggleExpand(id: Uuid) {
+        _expandedIds.update { current ->
+            if (id in current) {
+                current - id
+            } else {
+                (current + id).toList().takeLast(2).toSet() // Max 2 expanded
+            }
+        }
+    }
+
+    fun expand(id: Uuid) {
+        _expandedIds.update { (it + id).toList().takeLast(2).toSet() }
     }
 
     private fun Conversation.sortDate(sortOrder: ConversationSortOrder): LocalDate {

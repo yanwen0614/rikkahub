@@ -2,9 +2,10 @@ package me.rerere.rikkahub.data.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity
+@Entity(indices = [Index("parent_id")])
 data class ConversationEntity(
     @PrimaryKey
     val id: String,
@@ -34,4 +35,10 @@ data class ConversationEntity(
     val folderId: String = "",
     @ColumnInfo("config", defaultValue = "")
     val config: String = "",
+    @ColumnInfo("parent_id", defaultValue = "")
+    val parentId: String = "",
+    @ColumnInfo("sub_agent_config_id", defaultValue = "")
+    val subAgentConfigId: String = "",
+    @ColumnInfo("sub_agent_snapshot", defaultValue = "")
+    val subAgentSnapshot: String = "",
 )

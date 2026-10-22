@@ -14,13 +14,13 @@ import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.db.AppDatabase
-import me.rerere.rikkahub.data.db.fts.MessageFtsManager
-import me.rerere.rikkahub.data.db.fts.MessageSearchSort
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.fts.MessageFtsManager
+import me.rerere.rikkahub.data.db.fts.MessageSearchSort
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -293,7 +293,9 @@ class ConversationRepository(
         return if (entity != null) {
             val nodes = loadMessageNodes(entity.id)
             conversationEntityToConversation(entity, nodes)
-        } else null
+        } else {
+            null
+        }
     }
 
     suspend fun existsConversationById(uuid: Uuid): Boolean {
@@ -317,7 +319,10 @@ class ConversationRepository(
             )
             saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
         }
-        messageFtsManager.indexConversation(conversation)
+        // 只有顶层会话参与全文搜索，子代理会话不索引
+        if (conversation.parentId == null) {
+            messageFtsManager.indexConversation(conversation)
+        }
     }
 
     suspend fun updateConversation(conversation: Conversation) {
@@ -329,7 +334,10 @@ class ConversationRepository(
             messageNodeDAO.deleteByConversation(conversation.id.toString())
             saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
         }
-        messageFtsManager.indexConversation(conversation)
+        // 只有顶层会话参与全文搜索，子代理会话不索引
+        if (conversation.parentId == null) {
+            messageFtsManager.indexConversation(conversation)
+        }
     }
 
     suspend fun deleteConversation(conversation: Conversation) {
@@ -377,7 +385,7 @@ class ConversationRepository(
         return ConversationEntity(
             id = conversation.id.toString(),
             title = conversation.title,
-            nodes = "[]",  // nodes 现在存储在单独的表中
+            nodes = "[]", // nodes 现在存储在单独的表中
             createAt = conversation.createAt.toEpochMilli(),
             updateAt = conversation.updateAt.toEpochMilli(),
             assistantId = conversation.assistantId.toString(),
@@ -389,6 +397,9 @@ class ConversationRepository(
             workspaceCwd = conversation.workspaceCwd ?: "",
             folderId = conversation.folderId?.toString() ?: "",
             config = conversation.config?.let { JsonInstant.encodeToString(it) } ?: "",
+            parentId = conversation.parentId?.toString() ?: "",
+            subAgentConfigId = conversation.subAgentConfigId?.toString() ?: "",
+            subAgentSnapshot = conversation.subAgentSnapshot?.let { JsonInstant.encodeToString(it) } ?: "",
         )
     }
 
@@ -411,6 +422,13 @@ class ConversationRepository(
             workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
             folderId = conversationEntity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
             config = conversationEntity.config.ifEmpty { null }?.let { JsonInstant.decodeFromString(it) },
+            parentId = conversationEntity.parentId.ifEmpty { null }?.let { Uuid.parse(it) },
+            subAgentConfigId = conversationEntity.subAgentConfigId.ifEmpty { null }?.let { Uuid.parse(it) },
+            subAgentSnapshot = conversationEntity.subAgentSnapshot.ifEmpty { null }?.let {
+                JsonInstant.decodeFromString(
+                    it
+                )
+            },
         )
     }
 
@@ -423,6 +441,13 @@ class ConversationRepository(
                 }
             }
     }
+
+    fun getSubConversations(parentId: Uuid): Flow<List<Conversation>> =
+        conversationDAO.getSubConversations(parentId.toString())
+            .map { list -> list.map(::conversationSummaryToConversation) }
+
+    suspend fun getSubConversationIds(parentId: Uuid): List<Uuid> =
+        conversationDAO.getSubConversationIds(parentId.toString()).map { Uuid.parse(it) }
 
     suspend fun updatePinStatus(conversationId: Uuid, isPinned: Boolean) {
         conversationDAO.updatePinStatus(
@@ -484,6 +509,8 @@ class ConversationRepository(
             updateAt = Instant.ofEpochMilli(entity.updateAt),
             messageNodes = emptyList(),
             folderId = entity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
+            parentId = entity.parentId.ifEmpty { null }?.let { Uuid.parse(it) },
+            subConversationCount = entity.subConversationCount,
         )
     }
 
@@ -556,6 +583,9 @@ data class LightConversationEntity(
     val createAt: Long,
     val updateAt: Long,
     val folderId: String = "",
+    val parentId: String = "",
+    val subAgentConfigId: String = "",
+    val subConversationCount: Int = 0,
 )
 
 data class ConversationPageResult(

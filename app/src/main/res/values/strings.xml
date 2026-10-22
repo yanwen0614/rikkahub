@@ -1686,4 +1686,26 @@
   <string name="setting_provider_page_grok_disclaimer">Uses your SuperGrok subscription by signing in like the Grok CLI. Experimental: xAI may change or restrict this at any time.</string>
   <string name="setting_provider_page_device_code_hint">Confirm this code in the browser</string>
   <string name="setting_provider_page_device_code_reopen">Tap to open the page again</string>
+  <string name="assistant_sub_agents_title">Sub-Agents</string>
+  <string name="assistant_sub_agents_desc">Delegate tasks to specialized sub-assistants</string>
+  <string name="sub_agent_add">Add Sub-Agent</string>
+  <string name="sub_agent_edit">Edit Sub-Agent</string>
+  <string name="sub_agent_delete_confirm">Are you sure you want to delete this sub-agent?</string>
+  <string name="sub_agent_inherit_parent">Inherit from parent</string>
+  <string name="sub_agent_system_prompt_hint">Leave empty to inherit parent assistant\'s system prompt</string>
+  <string name="sub_agent_workspace_inherit">Inherit</string>
+  <string name="sub_agent_workspace_none">None</string>
+  <string name="sub_agent_workspace_specific">Specific workspace</string>
+  <string name="sub_agent_open_session">Open sub-session</string>
+  <string name="sub_agent_running">Sub-agent running...</string>
+  <string name="sub_agent_cancelled">Sub-agent cancelled</string>
+  <string name="tool_call_sub_agent_title">Sub-Agent</string>
+  <string name="sub_agent_basic_info">Basic Info</string>
+  <string name="sub_agent_model_params">Model &amp; Parameters</string>
+  <string name="sub_agent_tool_permissions">Tool Permissions</string>
+  <string name="sub_agent_icon">Icon</string>
+  <string name="sub_agent_name">Name</string>
+  <string name="sub_agent_description">Description</string>
+  <string name="sub_agent_system_prompt">System Prompt</string>
+  <string name="sub_agent_tool_count">%d tools</string>
 </resources>

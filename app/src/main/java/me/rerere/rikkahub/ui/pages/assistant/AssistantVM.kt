@@ -65,7 +65,8 @@ class AssistantVM(
             val copiedAssistant = assistant.copy(
                 id = kotlin.uuid.Uuid.random(),
                 name = "${assistant.name} (Clone)",
-                avatar = if(assistant.avatar is Avatar.Image) Avatar.Dummy else assistant.avatar,
+                avatar = if (assistant.avatar is Avatar.Image) Avatar.Dummy else assistant.avatar,
+                subAgents = assistant.subAgents.map { it.copy(id = kotlin.uuid.Uuid.random()) },
             )
             settingsStore.update { it.copy(assistants = it.assistants.plus(copiedAssistant)) }
             if (copyMemories) {

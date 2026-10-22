@@ -20,7 +20,9 @@ internal fun Settings.withBuiltInDefaults(): Settings {
                 description = defaultProvider.description,
                 shortDescription = defaultProvider.shortDescription,
             )
-        } else provider
+        } else {
+            provider
+        }
     }.toMutableList()
     val assistants = this.assistants.ifEmpty { DEFAULT_ASSISTANTS }.toMutableList()
     DEFAULT_ASSISTANTS.forEach { defaultAssistant ->
@@ -71,7 +73,13 @@ internal fun Settings.withoutInvalidReferences(): Settings {
                 // 过滤掉不存在的快捷消息 ID
                 quickMessageIds = assistant.quickMessageIds.filter { id ->
                     id in validQuickMessageIds
-                }.toSet()
+                }.toSet(),
+                subAgents = assistant.subAgents.distinctBy { it.id }.map { config ->
+                    config.copy(
+                        chatModelId = config.chatModelId?.takeIf { it in validModelIds },
+                        mcpServers = config.mcpServers?.filter { it in validMcpServerIds }?.toSet(),
+                    )
+                },
             )
         },
         ttsProviders = settings.ttsProviders.distinctBy { it.id },

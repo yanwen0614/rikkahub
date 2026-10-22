@@ -1,19 +1,14 @@
 package me.rerere.rikkahub.ui.pages.chat
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.Forward02
-import me.rerere.hugeicons.stroke.Pin
-import me.rerere.hugeicons.stroke.PinOff
-import me.rerere.hugeicons.stroke.Refresh01
-import me.rerere.hugeicons.stroke.Delete01
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,8 +45,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
+import kotlinx.coroutines.flow.Flow
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Forward02
+import me.rerere.hugeicons.stroke.Pin
+import me.rerere.hugeicons.stroke.PinOff
+import me.rerere.hugeicons.stroke.Refresh01
+import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
@@ -84,6 +92,10 @@ fun ColumnScope.ConversationList(
     modifier: Modifier = Modifier,
     header: (@Composable () -> Unit)? = null,
     onClick: (Conversation) -> Unit = {},
+    expandedIds: Set<Uuid> = emptySet(),
+    onToggleExpand: ((Uuid) -> Unit)? = null,
+    subConversationsProvider: ((Uuid) -> Flow<List<Conversation>>)? = null,
+    onChildClick: ((Uuid) -> Unit)? = null,
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
     onPin: (Conversation) -> Unit = {},
@@ -169,7 +181,11 @@ fun ColumnScope.ConversationList(
                         conversation = item.conversation,
                         selected = item.conversation.id == current.id,
                         loading = item.conversation.id in conversationJobs,
+                        expanded = item.conversation.id in expandedIds,
                         onClick = onClick,
+                        onToggleExpand = onToggleExpand,
+                        subConversationsProvider = subConversationsProvider,
+                        onChildClick = onChildClick,
                         onDelete = onDelete,
                         onRegenerateTitle = onRegenerateTitle,
                         onPin = onPin,
@@ -240,13 +256,17 @@ private fun ConversationItem(
     conversation: Conversation,
     selected: Boolean,
     loading: Boolean,
+    expanded: Boolean = false,
     modifier: Modifier = Modifier,
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
     onPin: (Conversation) -> Unit = {},
     onMoveToAssistant: (Conversation) -> Unit = {},
     onMoveToFolder: (Conversation) -> Unit = {},
-    onClick: (Conversation) -> Unit
+    onClick: (Conversation) -> Unit,
+    onToggleExpand: ((Uuid) -> Unit)? = null,
+    subConversationsProvider: ((Uuid) -> Flow<List<Conversation>>)? = null,
+    onChildClick: ((Uuid) -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focusManager = LocalFocusManager.current
@@ -258,33 +278,52 @@ private fun ConversationItem(
     var showDropdownMenu by remember {
         mutableStateOf(false)
     }
-    Box(
+    val hasChildren = conversation.subConversationCount > 0
+    val canExpand = hasChildren && onToggleExpand != null
+
+    Column(
         modifier = modifier
             .clip(RoundedCornerShape(50f))
-            .combinedClickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                onClick = { onClick(conversation) },
-                onLongClick = {
-                    // Also clear chat input focus when the drawer is permanently visible.
-                    focusManager.clearFocus(force = true)
-                    showDropdownMenu = true
-                }
-            )
             .background(backgroundColor),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = LocalIndication.current,
+                    onClick = { onClick(conversation) },
+                    onLongClick = {
+                        // Also clear chat input focus when the drawer is permanently visible.
+                        focusManager.clearFocus(force = true)
+                        showDropdownMenu = true
+                    }
+                )
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = conversation.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
-            Spacer(Modifier.weight(1f))
+
+            if (canExpand) {
+                IconButton(
+                    onClick = { onToggleExpand(conversation.id) },
+                    modifier = Modifier.size(24.dp),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
 
             // 置顶图标
             AnimatedVisibility(conversation.isPinned) {
@@ -379,6 +418,43 @@ private fun ConversationItem(
                         Icon(HugeIcons.Delete01, null)
                     }
                 )
+            }
+        }
+
+        // Sub-agent children when expanded
+        if (expanded && hasChildren && subConversationsProvider != null) {
+            val childFlow = remember(conversation.id) {
+                subConversationsProvider(conversation.id)
+            }
+            val children by childFlow.collectAsStateWithLifecycle(emptyList())
+            Column(
+                modifier = Modifier.padding(start = 16.dp)
+            ) {
+                children.forEach { child ->
+                    Surface(
+                        onClick = { onChildClick?.invoke(child.id) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        shape = RoundedCornerShape(50f),
+                        color = Color.Transparent,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = child.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

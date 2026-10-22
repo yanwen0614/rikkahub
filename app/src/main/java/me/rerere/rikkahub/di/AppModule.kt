@@ -6,6 +6,7 @@ import com.google.firebase.crashlytics.crashlytics
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.ChatRequestFactory
+import me.rerere.rikkahub.data.ai.SubAgentRunnerHolder
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -116,7 +117,8 @@ val appModule = module {
             metaGenerator = get(),
             mcpManager = get(),
             filesManager = get(),
-            folderRepository = get()
+            folderRepository = get(),
+            subAgentRunnerHolder = get()
         )
     }
 
@@ -142,5 +144,9 @@ val appModule = module {
             settingsStore = get(),
             filesManager = get()
         )
+    }
+
+    single {
+        SubAgentRunnerHolder()
     }
 }

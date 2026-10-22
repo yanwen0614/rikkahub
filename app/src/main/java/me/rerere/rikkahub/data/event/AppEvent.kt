@@ -3,6 +3,8 @@ package me.rerere.rikkahub.data.event
 import me.rerere.ai.ui.UIMessage
 import kotlin.uuid.Uuid
 
+enum class GenerationOrigin { CHAT, SUB_AGENT }
+
 sealed class AppEvent {
     data class Speak(val text: String) : AppEvent()
     data object OpenUsageAccessSettings : AppEvent()
@@ -12,6 +14,7 @@ sealed class AppEvent {
         val conversationId: Uuid,
         val lastMessage: UIMessage,
         val senderName: String,
+        val origin: GenerationOrigin = GenerationOrigin.CHAT,
     ) : AppEvent()
 
     /**
@@ -22,5 +25,6 @@ sealed class AppEvent {
         val conversationId: Uuid,
         val senderName: String,
         val contentPreview: String?,
+        val origin: GenerationOrigin = GenerationOrigin.CHAT,
     ) : AppEvent()
 }
