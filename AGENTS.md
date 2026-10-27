@@ -21,12 +21,17 @@ Material 3 look (cards with dividers, plain forms).
 ## Build, Test, and Development Commands
 
 ```bash
-./gradlew assembleDebug          # 构建 Debug APK
+./gradlew assembleGithubDebug    # 构建 GitHub 渠道的 Debug APK
+./gradlew assembleGithubRelease  # 构建 GitHub Release / 每日构建用的 APK
+./gradlew bundlePlayRelease      # 构建上架 Google Play 的 AAB
 ./gradlew test                   # 运行所有模块的 JVM 单元测试
 ./gradlew lint                   # 运行 Android Lint
 ./gradlew spotlessApply          # 用 ktlint 格式化相对 origin/master 改动过的 Kotlin 文件
 ./gradlew spotlessCheck          # 只检查格式不改文件
 ```
+
+App 有一个 `distribution` 维度的 product flavor：`github`（默认）和 `play`，共用同一个 applicationId。
+渠道差异用 `BuildConfig.IS_PLAY_STORE` 判断（如 Play 版不检查更新、不显示更新提醒）。
 
 ## Module Structure
 
@@ -79,3 +84,33 @@ Material 3 look (cards with dividers, plain forms).
 ## Skills
 
 - `.agents/skills/`: `claude-api/gemini-api-dev/gemini-interactions-api` (provider APIs), `find-hugeicons` (Compose icons), `locale-tui-localization` (strings.xml ops), `publish-release` (release flow).
+
+- **MessageNode**: A container holding one or more UIMessages to implement message branching functionality. Each node
+  maintains a list of alternative messages and tracks which message is currently selected (selectIndex). This enables
+  users to regenerate responses and switch between different conversation branches, creating a tree-like conversation
+  structure. (app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
+
+- **Message Transformer**: A pipeline mechanism for transforming messages before sending to AI providers (
+  InputMessageTransformer) or after receiving responses (OutputMessageTransformer). Transformers can modify message
+  content, add metadata, apply templates, handle special tags, convert formats, and perform OCR. Common transformers
+  include:
+  - TemplateTransformer: Apply Pebble templates to user messages with variables like time/date
+  - ThinkTagTransformer: Extract ` thinking` tags and convert to reasoning parts
+  - RegexOutputTransformer: Apply regex replacements to assistant responses
+  - DocumentAsPromptTransformer: Convert document attachments to text prompts
+  - Base64ImageToLocalFileTransformer: Convert base64 images to local file references
+  - OcrTransformer: Perform OCR on images to extract text
+
+  Output transformers support `visualTransform()` for UI display during streaming and `onGenerationFinish()` for final
+  processing after generation completes.
+  (app/src/main/java/me/rerere/rikkahub/data/ai/transformers/Transformer.kt)
+
+## Internationalization
+
+- String resources are usually located in `app/src/main/res/values*/strings.xml`; feature modules such as `search`
+  may also maintain their own `values*/strings.xml`
+- Use `stringResource(R.string.key_name)` in Compose
+- Page-specific strings should use page prefix (e.g., `setting_page_`)
+- If the user does not explicitly request localization, prioritize implementing functionality without considering
+  localization. (e.g `Text("Hello world")`)
+- Add, translate or clean up strings with the `tools/i18n` CLI (Bun); see the `i18n-localization` skill.

@@ -46,7 +46,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             properties = buildJsonObject {
                 put("query", buildJsonObject {
                     put("type", "string")
-                    put("description", "search keyword")
+                    put("description", SEARCH_QUERY_DESCRIPTION)
                 })
                 put("topic", buildJsonObject {
                     put("type", "string")
@@ -81,6 +81,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             ?: return@withContext Result.failure(IllegalArgumentException("query is required"))
         val topic = params["topic"]?.jsonPrimitive?.contentOrNull ?: "general"
 
+<<<<<<< HEAD
         // Validate topic
         if (topic !in listOf("general", "news", "finance")) {
             return@withContext Result.failure(IllegalArgumentException("topic must be one of `general`, `news`, `finance`"))
@@ -91,7 +92,11 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             put("max_results", commonOptions.resultSize)
             put("search_depth", serviceOptions.depth.ifEmpty { "advanced" })
             put("topic", topic)
-            put("include_answer", "advanced")
+            if (serviceOptions.includeAnswer) {
+                put("include_answer", "advanced")
+            } else {
+                put("include_answer", false)
+            }
             put("include_images", true)
         }
         // 请求前 LRU 轮询选 key，限额失败自动换 key 重试
