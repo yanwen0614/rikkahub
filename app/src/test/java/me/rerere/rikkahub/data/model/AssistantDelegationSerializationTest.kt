@@ -28,6 +28,13 @@ class AssistantDelegationSerializationTest {
     }
 
     @Test
+    fun `missing assistant call permission defaults to false after serialization round trip`() {
+        val decoded = json.decodeFromString<Assistant>("{}")
+
+        assertFalse(decoded.acceptsAssistantCalls)
+    }
+
+    @Test
     fun `delegate assistant option uses stable serial name`() {
         assertEquals(
             "delegate_assistant",

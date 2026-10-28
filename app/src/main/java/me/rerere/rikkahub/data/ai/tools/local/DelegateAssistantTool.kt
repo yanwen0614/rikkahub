@@ -79,7 +79,8 @@ internal fun parseDelegationParams(input: String): DelegateAssistantParams {
     return DelegateAssistantParams(assistantName, message, conversationId, createNew)
 }
 
-private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+private fun JsonObject.string(key: String): String? =
+    (this[key] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull
 
 internal fun resolveDelegateAssistant(
     assistants: List<Assistant>,
