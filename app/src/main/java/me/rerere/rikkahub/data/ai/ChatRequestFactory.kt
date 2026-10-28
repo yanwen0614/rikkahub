@@ -19,6 +19,7 @@ import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.buildMemoryPrompt
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
+import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantExecutor
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -36,6 +37,7 @@ import me.rerere.rikkahub.data.ai.transformers.transformThinkTags
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -74,6 +76,7 @@ class ChatRequestFactory(
     private val providerManager: ProviderManager,
     private val usageRecorder: UsageRecorder,
     private val chatToolFactory: ChatToolFactory,
+    private val settingsStore: SettingsStore,
     private val memoryRepository: MemoryRepository,
     templateTransformer: TemplateTransformer,
     workspaceRepository: WorkspaceRepository,
@@ -95,14 +98,20 @@ class ChatRequestFactory(
     )
 
     /** 解析本轮的助手、模型、记忆和工具；MCP 服务名不合法时抛出 InvalidMcpServerNamesException */
-    suspend fun createContext(settings: Settings, conversation: Conversation): ChatTurnContext {
+    suspend fun createContext(
+        settings: Settings,
+        conversation: Conversation,
+        delegationAllowed: Boolean = true,
+        delegateAssistantExecutor: DelegateAssistantExecutor? = null,
+    ): ChatTurnContext {
+        val latestSettings = settingsStore.awaitLoaded()
         // 模型、思考级别、搜索、工具等以会话上固定的配置为准
-        val assistant = settings.getAssistantOf(conversation)
-        val model = settings.getChatModelOf(conversation)
+        val assistant = latestSettings.getAssistantOf(conversation)
+        val model = latestSettings.getChatModelOf(conversation)
             ?: throw IllegalStateException("No chat model selected")
-        val provider = model.findProvider(settings.providers) ?: error("Provider not found")
+        val provider = model.findProvider(latestSettings.providers) ?: error("Provider not found")
         return ChatTurnContext(
-            settings = settings,
+            settings = latestSettings,
             assistant = assistant,
             model = model,
             providerSetting = provider,
@@ -111,10 +120,13 @@ class ChatRequestFactory(
             workspaceCwd = conversation.workspaceCwd,
             memories = if (assistant.enableMemory) memoryRepository.getFiles(assistant.memoryId) else emptyList(),
             tools = chatToolFactory.createTools(
-                settings = settings,
+                settings = latestSettings,
                 assistant = assistant,
                 model = model,
                 workspaceCwd = conversation.workspaceCwd,
+                conversationId = conversation.id,
+                delegationAllowed = delegationAllowed,
+                delegateAssistantExecutor = delegateAssistantExecutor,
             ),
         )
     }

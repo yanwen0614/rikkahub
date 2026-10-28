@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.ai.agent.AgentEvent
 import me.rerere.ai.agent.AgentFinishReason
@@ -46,6 +48,7 @@ import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
+import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantExecutor
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -84,6 +87,7 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
@@ -117,7 +121,7 @@ class ChatService(
 ) {
     /** 一轮生成的结果 */
     private sealed interface TurnResult {
-        data class Finished(val reason: AgentFinishReason) : TurnResult
+        data class Finished(val reason: AgentFinishReason, val replyNodeId: Uuid?) : TurnResult
 
         /** 没能完成：错误已经报告给用户，消息队列也已暂停 */
         data object Failed : TurnResult
@@ -151,6 +155,11 @@ class ChatService(
         onGenerationFinished = ::onSessionGenerationFinished,
         onSessionRemoved = memoryConsolidationScheduler::onConversationLeft,
     )
+    private val delegationWaiters = ConcurrentHashMap<Uuid, DelegationWaiter>()
+    private val delegationTargets = ConcurrentHashMap<Uuid, Uuid>()
+    private val deletingDelegationTargets = ConcurrentHashMap<Uuid, Int>()
+    private val delegationLifecycleLock = Any()
+    private val delegateCreateLock = Mutex()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -186,6 +195,9 @@ class ChatService(
         // 取消只来自停止（已自行暂停）或删除，这里再暂停会盖掉停止后用户发送时恢复的队列
         if (cause != null && cause !is CancellationException) session.messageQueue.pause()
         if (session.state.value.isAwaitingToolApproval) {
+            delegationTargets.entries.filter { it.value == session.id }.forEach { entry ->
+                delegationWaiters[entry.key]?.fail("target_approval_required")
+            }
             session.messageQueue.failReplyWaiters(context.getString(R.string.chat_page_voice_tool_approval))
         }
         appScope.launch { dispatchNextQueuedMessage(session.id) }
@@ -432,7 +444,6 @@ class ChatService(
                 val processedContent = queued.parts.replaceUserRegexes(assistant)
 
                 // 添加消息到列表
-                val previousIds = session.state.value.currentMessages.mapTo(HashSet()) { it.id }
                 session.update {
                     it.copy(
                         messageNodes = it.messageNodes + UIMessage(
@@ -441,20 +452,40 @@ class ChatService(
                         ).toMessageNode(),
                     )
                 }
+                queued.userMessageId = session.state.value.currentMessages.lastOrNull()?.id
                 session.flush()
                 session.submittingMessage = null
 
                 // 开始补全
-                val result = if (queued.answer) runTurn(session) else null
-
+                val executor = if (queued.requestId == null) {
+                    DelegateAssistantExecutor { request -> executeDelegation(request) }
+                } else null
+                val result = if (queued.answer) runTurn(
+                    session,
+                    delegationAllowed = queued.requestId == null,
+                    delegateAssistantExecutor = executor,
+                ) else null
+                queued.replyNodeId = (result as? TurnResult.Finished)?.replyNodeId
                 queued.reply?.completeWith(runCatching {
-                    check(result != TurnResult.Failed) { context.getString(R.string.chat_page_voice_generation_failed) }
-                    check((result as? TurnResult.Finished)?.reason !is AgentFinishReason.AwaitingApproval) {
-                        context.getString(R.string.chat_page_voice_tool_approval)
+                    if (result == TurnResult.Failed) {
+                        throw IllegalStateException(
+                            if (queued.requestId != null) "target_generation_failed"
+                            else context.getString(R.string.chat_page_voice_generation_failed)
+                        )
                     }
-                    session.state.value.currentMessages
-                        .filter { it.id !in previousIds && it.role == MessageRole.ASSISTANT }
-                        .joinToString("\n") { it.toText() }
+                    val finished = result as? TurnResult.Finished
+                    if (finished?.reason is AgentFinishReason.AwaitingApproval) {
+                        if (queued.requestId != null) throw IllegalStateException("target_approval_required")
+                        else throw IllegalStateException(context.getString(R.string.chat_page_voice_tool_approval))
+                    } else finished?.replyNodeId?.let { replyId ->
+                        checkNotNull(queued.userMessageId) { "target_user_message_missing" }
+                        check(session.state.value.getMessageNodeByMessageId(queued.userMessageId!!) != null) {
+                            "target_user_message_missing"
+                        }
+                        val replyNode = session.state.value.messageNodes.firstOrNull { it.id == replyId }
+                        check(replyNode?.currentMessage?.role == MessageRole.ASSISTANT) { "target_reply_message_missing" }
+                        replyNode.currentMessage.toText()
+                    }.orEmpty()
                 })
                 // Voice owns playback, including when its observer has already left the page.
                 // The ordinary autoplay collector must not read a late voice reply again.
@@ -473,6 +504,92 @@ class ChatService(
         }
         session.setJob(job)
         return job
+    }
+
+    private suspend fun executeDelegation(
+        request: me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantRequest,
+    ): List<UIMessagePart> {
+        val targetId = request.conversationId ?: Uuid.random()
+        val target = if (request.createNew) {
+            delegateCreateLock.withLock {
+                check(!conversationRepo.existsConversationById(targetId) && sessionManager.get(targetId) == null) {
+                    "target_conversation_id_collision"
+                }
+                sessionManager.getOrCreate(targetId)
+            }
+        } else {
+            sessionManager.get(targetId) ?: sessionManager.getOrCreate(targetId)
+        }
+        val waiter = DelegationWaiter()
+        val targetIncarnation = target.incarnation
+        synchronized(delegationLifecycleLock) {
+            if (deletingDelegationTargets.containsKey(targetId) || sessionManager.get(targetId) !== target) {
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
+            }
+            delegationWaiters[request.requestId] = waiter
+            delegationTargets[request.requestId] = targetId
+        }
+        var itemId: Uuid? = null
+        try {
+            val latestSettings = settingsStore.awaitLoaded()
+            val targetAssistant = latestSettings.assistants.firstOrNull { it.id == request.assistant.id }
+                ?: throw IllegalStateException("target_assistant_missing")
+            if (!targetAssistant.acceptsAssistantCalls) throw IllegalStateException("assistant_not_allowed")
+            val conversation = if (request.createNew) {
+                target.initialize(
+                    load = { null },
+                    create = {
+                        Conversation.ofId(targetId, assistantId = targetAssistant.id, newConversation = true)
+                            .updateCurrentMessages(targetAssistant.presetMessages)
+                            .bindConfig(latestSettings)
+                            .fillModelSnapshots(latestSettings)
+                    },
+                )
+                target.state.value
+            } else {
+                target.initialize(
+                    load = { loadConversation(targetId) },
+                    create = { throw NotFoundException("Conversation not found") },
+                )
+                target.state.value
+            }
+            if (conversation.assistantId != targetAssistant.id) {
+                throw IllegalStateException("conversation_assistant_mismatch")
+            }
+            if (sessionManager.get(targetId) !== target || target.incarnation != targetIncarnation) {
+                waiter.fail("target_conversation_deleted")
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
+            }
+            target.messageQueue.resume()
+            target.messageQueue.enqueue(
+                listOf(UIMessagePart.Text(request.message)),
+                reply = waiter.deferred,
+                requestId = request.requestId,
+            )
+            itemId = target.messageQueue.state.value.messages.lastOrNull { it.requestId == request.requestId }?.id
+            if (itemId == null) throw IllegalStateException("target_queue_item_missing")
+            dispatchNextQueuedMessage(targetId)
+            val text = waiter.await() ?: throw IllegalStateException("target_generation_failed")
+            return listOf(UIMessagePart.Text("conversation_id: $targetId\n$text"))
+        } catch (e: CancellationException) {
+            // Remove only while pending. Once dequeued, target generation owns its lifecycle.
+            itemId?.let { id ->
+                target.messageQueue.removeByIdAndFail(id, "delegation_wait_cancelled")
+            }
+            throw e
+        } catch (e: Exception) {
+            if (e is me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException) throw e
+            waiter.terminalErrorCode?.let {
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException(it)
+            }
+            if (e.message in setOf("target_approval_required", "target_conversation_deleted")) {
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException(e.message!!)
+            }
+            throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_generation_failed")
+        } finally {
+            delegationWaiters.remove(request.requestId, waiter)
+            delegationTargets.remove(request.requestId, targetId)
+        }
     }
 
     // 发送、重新生成和审批失败时报告错误并暂停队列，排队的消息等用户处理完再继续
@@ -579,7 +696,12 @@ class ChatService(
      * 发送的最后一条是助手消息时从它继续（比如审批之后），回复写回那条消息。
      * 失败时报告错误、暂停消息队列并返回 [TurnResult.Failed]；取消时直接抛出。
      */
-    private suspend fun runTurn(session: ConversationSession, regenerateNodeId: Uuid? = null): TurnResult {
+    private suspend fun runTurn(
+        session: ConversationSession,
+        regenerateNodeId: Uuid? = null,
+        delegationAllowed: Boolean = true,
+        delegateAssistantExecutor: DelegateAssistantExecutor? = null,
+    ): TurnResult {
         val conversationId = session.id
         // 先清理上一轮状态；确定历史后，仅为真正的续写恢复消息 ID。
         session.replyMessageId.value = null
@@ -614,7 +736,7 @@ class ChatService(
             // 它会挂起也可能失败，期间或失败后不能还指着上一轮的回复
             session.replyMessageId.value = history.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }?.id
 
-            val turn = requestFactory.createContext(settings, conversation)
+            val turn = requestFactory.createContext(settings, conversation, delegationAllowed, delegateAssistantExecutor)
             senderName = if (turn.assistant.useAssistantAvatar) {
                 turn.assistant.name.ifEmpty { context.getString(R.string.assistant_page_default_assistant) }
             } else {
@@ -674,7 +796,7 @@ class ChatService(
                 sessionManager.launchWithSession(conversationId) { generateSuggestion(conversationId) }
                 if (turn.assistant.enableMemory) memoryConsolidationScheduler.onTurnFinished(session.state.value)
             }
-            return TurnResult.Finished(reason)
+            return TurnResult.Finished(reason, replyNodeId)
         } catch (e: CancellationException) {
             appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
             throw e
@@ -1086,13 +1208,37 @@ class ChatService(
      */
     suspend fun deleteConversation(conversationId: Uuid) {
         val session = sessionManager.getOrCreate(conversationId)
+        synchronized(delegationLifecycleLock) {
+            deletingDelegationTargets[conversationId] = session.incarnation
+        }
+        failDelegationsForSession(session)
         discardQueuedMessages(session)
         session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
             conversationRepo.getConversationById(conversationId)?.let { conversationRepo.deleteConversation(it) }
             // 数据库那份不知道只在内存里出现过的附件
             previous?.let { filesManager.deleteChatFiles(it.files) }
         }
+        synchronized(delegationLifecycleLock) {
+            if (deletingDelegationTargets[conversationId] == session.incarnation - 1) {
+                deletingDelegationTargets.remove(conversationId)
+            }
+        }
         sessionManager.removeIfIdle(session)
+    }
+
+    private fun failDelegationsForSession(session: ConversationSession) {
+        synchronized(delegationLifecycleLock) {
+            val requestIds = buildSet {
+                session.messageQueue.state.value.messages.mapNotNullTo(this) { it.requestId }
+                session.submittingMessage?.requestId?.let(::add)
+                delegationTargets.entries.filter { it.value == session.id }.mapTo(this) { it.key }
+            }
+            requestIds.forEach { requestId ->
+                delegationWaiters.remove(requestId)?.fail("target_conversation_deleted")
+                delegationTargets.remove(requestId)
+            }
+        }
+        session.messageQueue.failRequestWaiters("target_conversation_deleted")
     }
 
     /** 撤销删除：写回删除前的会话，还停在这个会话上的页面也一并换回 */

@@ -1387,6 +1387,10 @@
   <string name="setting_mcp_page_key_pool_url_placeholder">URL does not support ${key}</string>
   <string name="assistant_page_local_tools_chart_display_title">Chart Display</string>
   <string name="assistant_page_local_tools_chart_display_desc">Let the AI display line, bar, and scatter charts</string>
+  <string name="assistant_page_accept_assistant_calls_title">Accept calls from other assistants</string>
+  <string name="assistant_page_accept_assistant_calls_desc">Allow other assistants to delegate tasks to this assistant</string>
+  <string name="assistant_page_local_tools_delegate_assistant_title">Delegate Assistant</string>
+  <string name="assistant_page_local_tools_delegate_assistant_desc">Let this assistant ask another assistant to complete a task</string>
   <string name="chat_message_tool_chart_display">Display chart</string>
   <string name="chat_message_tool_chart_display_with_title">Display chart: %1$s</string>
   <string name="error_fast_model_not_found">Fast model not found. Please select one in settings.</string>

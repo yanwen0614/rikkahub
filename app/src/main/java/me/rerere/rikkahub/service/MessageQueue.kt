@@ -16,6 +16,9 @@ data class QueuedMessage(
     val isEditing: Boolean = false,
     // Optional in-memory observer; null result means the queued message was withdrawn.
     val reply: CompletableDeferred<String?>? = null,
+    val requestId: Uuid? = null,
+    var userMessageId: Uuid? = null,
+    var replyNodeId: Uuid? = null,
 )
 
 data class MessageQueueState(
@@ -42,7 +45,10 @@ class MessageQueue {
     val state = mutableState.asStateFlow()
 
     @Synchronized
-    fun enqueue(parts: List<UIMessagePart>, answer: Boolean = true, reply: CompletableDeferred<String?>? = null) {
+    fun enqueue(
+        parts: List<UIMessagePart>, answer: Boolean = true,
+        reply: CompletableDeferred<String?>? = null, requestId: Uuid? = null,
+    ) {
         if (parts.isEmptyInputMessage()) {
             reply?.complete(null)
             return
@@ -52,6 +58,7 @@ class MessageQueue {
                 parts = parts.toList(),
                 answer = answer,
                 reply = reply,
+                requestId = requestId,
             ),
         )
     }
@@ -71,6 +78,17 @@ class MessageQueue {
         mutableState.value =
             state.value.copy(messages = state.value.messages.filterNot { it.id == id })
         removed.reply?.complete(null)
+        return removed
+    }
+
+    @Synchronized
+    fun removeById(id: Uuid): QueuedMessage? = remove(id)
+
+    @Synchronized
+    fun removeByIdAndFail(id: Uuid, message: String): QueuedMessage? {
+        val removed = state.value.messages.firstOrNull { it.id == id } ?: return null
+        mutableState.value = state.value.copy(messages = state.value.messages.filterNot { it.id == id })
+        removed.reply?.completeExceptionally(IllegalStateException(message))
         return removed
     }
 
@@ -109,6 +127,10 @@ class MessageQueue {
         state.value.messages.forEach {
             it.reply?.completeExceptionally(IllegalStateException(message))
         }
+    }
+
+    fun failRequestWaiters(message: String) {
+        state.value.messages.filter { it.requestId != null }.forEach { removeByIdAndFail(it.id, message) }
     }
 
     @Synchronized

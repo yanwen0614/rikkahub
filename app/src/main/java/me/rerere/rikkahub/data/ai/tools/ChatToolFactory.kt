@@ -8,6 +8,7 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantExecutor
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FileFolders
@@ -50,6 +51,9 @@ class ChatToolFactory(
         assistant: Assistant,
         model: Model,
         workspaceCwd: String? = null,
+        conversationId: Uuid? = null,
+        delegationAllowed: Boolean = true,
+        delegateAssistantExecutor: DelegateAssistantExecutor? = null,
     ): List<Tool> {
         val workspaceTools = createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd)
         val tools = buildList {
@@ -59,7 +63,16 @@ class ChatToolFactory(
             if (shouldUseExternalWebSearch(assistant, model)) {
                 addAll(createSearchTools(settings))
             }
-            addAll(localTools.getTools(assistant.localTools))
+            addAll(
+                localTools.getTools(
+                    options = assistant.localTools,
+                    sourceAssistantId = assistant.id,
+                    sourceConversationId = conversationId,
+                    delegationAllowed = delegationAllowed,
+                    delegateAssistantExecutor = delegateAssistantExecutor,
+                    settingsSnapshot = settings,
+                )
+            )
             if (assistant.enableRecentChatsReference) {
                 addAll(createConversationTools(conversationRepository, assistant.id))
             }

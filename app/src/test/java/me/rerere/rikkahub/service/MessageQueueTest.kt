@@ -13,6 +13,54 @@ class MessageQueueTest {
     private fun text(value: String) = listOf(UIMessagePart.Text(value))
 
     @Test
+    fun `delegation correlation stays on the dispatched item and pending removal fails only its waiter`() = runBlocking {
+        val queue = MessageQueue()
+        val requestId = kotlin.uuid.Uuid.random()
+        val reply = CompletableDeferred<String?>()
+        queue.enqueue(text("target"), reply = reply, requestId = requestId)
+        val queuedId = queue.state.value.messages.single().id
+        val removed = queue.removeById(queuedId)
+        assertEquals(requestId, removed?.requestId)
+        assertTrue(reply.isCompleted)
+        assertNull(reply.getCompleted())
+        assertNull(queue.takeNext())
+
+        val startedWaiter = CompletableDeferred<String?>()
+        queue.enqueue(text("started"), reply = startedWaiter, requestId = requestId)
+        val started = queue.takeNext()!!
+        assertEquals(requestId, started.requestId)
+        assertFalse(startedWaiter.isCompleted)
+    }
+
+    @Test
+    fun `approval and deletion failures are returned to delegation request`() = runBlocking {
+        val queue = MessageQueue()
+        val approval = CompletableDeferred<String?>()
+        val deletion = CompletableDeferred<String?>()
+        queue.enqueue(text("approval"), reply = approval, requestId = kotlin.uuid.Uuid.random())
+        queue.enqueue(text("deleted"), reply = deletion, requestId = kotlin.uuid.Uuid.random())
+        queue.failRequestWaiters("target_conversation_deleted")
+        assertEquals("target_conversation_deleted", runCatching { approval.await() }.exceptionOrNull()?.message)
+        assertEquals("target_conversation_deleted", runCatching { deletion.await() }.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `removing a still queued delegation by item id does not affect a started waiter`() = runBlocking {
+        val queue = MessageQueue()
+        val pendingReply = CompletableDeferred<String?>()
+        queue.enqueue(text("pending"), reply = pendingReply, requestId = kotlin.uuid.Uuid.random())
+        val pendingId = queue.state.value.messages.single().id
+        queue.removeById(pendingId)
+
+        val startedReply = CompletableDeferred<String?>()
+        queue.enqueue(text("started"), reply = startedReply, requestId = kotlin.uuid.Uuid.random())
+        val started = queue.takeNext()!!
+        assertTrue(startedReply.isActive)
+        assertEquals(null, queue.removeById(started.id))
+        assertTrue(startedReply.isActive)
+    }
+
+    @Test
     fun `editing a voice message preserves its reply observer and queue position`() {
         val queue = MessageQueue()
         val reply = CompletableDeferred<String?>()
