@@ -57,6 +57,8 @@ class DelegateAssistantToolTest {
             """{"assistant_name":"Target","message":"Hi","conversation_id":"$conversationId"}""",
             """{"assistant_name":"Target","message":"Hi","create_new":false}""",
             """{"assistant_name":"Target","message":"Hi","conversation_id":"bad"}""",
+            """{"assistant_name":"Target","message":"Hi","create_new":"false","conversation_id":"$conversationId"}""",
+            """{"assistant_name":"Target","message":"Hi","conversation_id":42}""",
         ).forEach { input ->
             assertFailsWith<DelegateAssistantException> { parseDelegationParams(input) }
         }

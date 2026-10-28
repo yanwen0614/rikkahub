@@ -3,18 +3,17 @@ package me.rerere.rikkahub.data.ai.tools.local
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.coroutines.CancellationException
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Assistant
-import kotlinx.coroutines.CancellationException
 import kotlin.uuid.Uuid
 
 class DelegateAssistantException(val code: String) : IllegalArgumentException(code)
@@ -56,9 +55,17 @@ internal fun parseDelegationParams(input: String): DelegateAssistantParams {
         .getOrElse { throw DelegateAssistantException("invalid_arguments") }
     val assistantName = obj.string("assistant_name") ?: throw DelegateAssistantException("invalid_assistant_name")
     val message = obj.string("message") ?: throw DelegateAssistantException("invalid_message")
-    val createNew = (obj["create_new"] as? JsonPrimitive)?.booleanOrNull ?: true
-    val conversationId = obj.string("conversation_id")?.let {
-        runCatching { Uuid.parse(it) }.getOrElse { throw DelegateAssistantException("invalid_conversation_id") }
+    val createNew = when (val value = obj["create_new"]) {
+        null -> true
+        is JsonPrimitive -> value.booleanOrNull ?: throw DelegateAssistantException("invalid_create_new")
+        else -> throw DelegateAssistantException("invalid_create_new")
+    }
+    val conversationId = when (val value = obj["conversation_id"]) {
+        null -> null
+        is JsonPrimitive -> value.contentOrNull
+            ?.let { runCatching { Uuid.parse(it) }.getOrElse { throw DelegateAssistantException("invalid_conversation_id") } }
+            ?: throw DelegateAssistantException("invalid_conversation_id")
+        else -> throw DelegateAssistantException("invalid_conversation_id")
     }
     if (createNew && conversationId != null) throw DelegateAssistantException("conversation_id_not_allowed")
     if (!createNew && conversationId == null) throw DelegateAssistantException("conversation_id_required")

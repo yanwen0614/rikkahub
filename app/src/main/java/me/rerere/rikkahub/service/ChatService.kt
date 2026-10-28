@@ -449,22 +449,21 @@ class ChatService(
                 val processedContent = queued.parts.replaceUserRegexes(assistant)
 
                 // 添加消息到列表
+                val userMessage = UIMessage(
+                    role = MessageRole.USER,
+                    parts = processedContent,
+                )
                 session.update {
                     it.copy(
-                        messageNodes = it.messageNodes + UIMessage(
-                            role = MessageRole.USER,
-                            parts = processedContent,
-                        ).let { message ->
-                            if (queued.requestId != null) message.copy(id = queued.id) else message
-                        }.toMessageNode(),
+                        messageNodes = it.messageNodes + userMessage.toMessageNode(),
                     )
                 }
-                queued.userMessageId = queued.id
+                queued.userMessageId = userMessage.id
                 session.flush()
                 session.submittingMessage = null
 
                 // 开始补全
-                    val executor = if (queued.requestId == null) {
+                val executor = if (queued.requestId == null) {
                     DelegateAssistantExecutor { request -> executeDelegation(request) }
                 } else null
                 val result = if (queued.answer) runTurn(
@@ -503,12 +502,12 @@ class ChatService(
                                 replyNodeId = turn.replyNodeId,
                                 finished = turn.reason !is AgentFinishReason.AwaitingApproval,
                             ),
-                                currentUserRole = queued.userMessageId?.let { userId ->
-                                    session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.role
-                                },
-                                currentUserMessageId = queued.userMessageId?.let { userId ->
-                                    session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.id
-                                },
+                            currentUserRole = queued.userMessageId?.let { userId ->
+                                session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.role
+                            },
+                            currentUserMessageId = queued.userMessageId?.let { userId ->
+                                session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.id
+                            },
                             replyNode = replyNode,
                         )
                     }.orEmpty()
