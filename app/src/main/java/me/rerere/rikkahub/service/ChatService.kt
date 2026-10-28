@@ -561,19 +561,19 @@ class ChatService(
                 check(!conversationRepo.existsConversationById(targetId) && sessionManager.get(targetId) == null) {
                     "target_conversation_id_collision"
                 }
-                sessionManager.getOrCreate(targetId)
+                sessionManager.acquire(targetId)
             }
         } else {
-            sessionManager.get(targetId) ?: sessionManager.getOrCreate(targetId)
+            sessionManager.acquire(targetId)
         }
         val waiter = DelegationWaiter()
         val targetIncarnation = target.incarnation
-        if (deletingDelegationTargets.containsKey(targetId) || sessionManager.get(targetId) !== target) {
-            throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
-        }
         var requestId: Uuid? = null
         var itemId: Uuid? = null
         try {
+            if (deletingDelegationTargets.containsKey(targetId) || sessionManager.get(targetId) !== target) {
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
+            }
             val latestSettings = settingsStore.awaitLoaded()
             val targetAssistant = revalidateDelegateAssistant(
                 assistants = latestSettings.assistants,
@@ -649,6 +649,7 @@ class ChatService(
                 delegationWaiters.remove(id, waiter)
                 delegationTargets.remove(id, targetId)
             }
+            sessionManager.release(targetId)
         }
     }
 

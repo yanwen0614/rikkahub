@@ -2,6 +2,7 @@ package me.rerere.rikkahub.service
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -90,6 +91,38 @@ class ConversationSessionManagerTest {
             operation.cancel()
             operation.join()
             assertFalse(session.isInUse)
+            rig.manager.removeIfIdle(session)
+            assertNull(rig.manager.get(id))
+        } finally {
+            rig.close()
+        }
+    }
+
+    @Test
+    fun `acquired session remains registered while initialization is suspended`() = runBlocking {
+        val rig = Rig()
+        try {
+            val id = Uuid.random()
+            val session = rig.manager.acquire(id)
+            val loadStarted = CompletableDeferred<Unit>()
+            val continueLoad = CompletableDeferred<Unit>()
+            val initialization = rig.scope.launch {
+                session.initialize(
+                    load = {
+                        loadStarted.complete(Unit)
+                        continueLoad.await()
+                        Conversation.ofId(id)
+                    },
+                )
+            }
+            loadStarted.await()
+
+            rig.manager.removeIfIdle(session)
+            assertSame(session, rig.manager.get(id))
+
+            continueLoad.complete(Unit)
+            initialization.join()
+            rig.manager.release(id)
             rig.manager.removeIfIdle(session)
             assertNull(rig.manager.get(id))
         } finally {
