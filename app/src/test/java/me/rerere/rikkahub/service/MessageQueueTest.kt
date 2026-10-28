@@ -2,6 +2,7 @@ package me.rerere.rikkahub.service
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import me.rerere.ai.agent.AgentFinishReason
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -17,29 +18,39 @@ class MessageQueueTest {
     private fun text(value: String) = listOf(UIMessagePart.Text(value))
 
     @Test
+    fun `only completed agent turns can return delegated output`() {
+        assertTrue(isDelegationTurnCompleted(AgentFinishReason.Completed))
+        assertFalse(isDelegationTurnCompleted(AgentFinishReason.AwaitingApproval(emptySet())))
+        assertFalse(isDelegationTurnCompleted(AgentFinishReason.StepLimitReached))
+    }
+
+    @Test
     fun `queued reply correlation requires matching request user and assistant reply`() {
         val requestId = kotlin.uuid.Uuid.random()
         val userId = kotlin.uuid.Uuid.random()
         val userNode = UIMessage(id = userId, role = MessageRole.USER, parts = text("request")).toMessageNode()
         val replyNode = UIMessage(role = MessageRole.ASSISTANT, parts = text("answer")).toMessageNode()
-        val result = ChatServiceQueuedTurnResult(requestId, userId, replyNode.id, finished = true)
+        val result = ChatServiceQueuedTurnResult(requestId, userId, replyNode.id, finished = true, finalMessageId = replyNode.currentMessage.id)
 
-        assertEquals("answer", queuedReplyText(requestId, userId, replyNode.id, result, MessageRole.USER, userId, replyNode))
+        assertEquals("answer", queuedReplyText(requestId, userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userId, replyNode))
         assertEquals("target_request_mismatch", runCatching {
-            queuedReplyText(kotlin.uuid.Uuid.random(), userId, replyNode.id, result, MessageRole.USER, userId, replyNode)
+            queuedReplyText(kotlin.uuid.Uuid.random(), userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userId, replyNode)
         }.exceptionOrNull()?.message)
         assertEquals("target_user_message_mismatch", runCatching {
-            queuedReplyText(requestId, userId, replyNode.id, result, MessageRole.USER, userNode.id, replyNode)
+            queuedReplyText(requestId, userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userNode.id, replyNode)
         }.exceptionOrNull()?.message)
         assertEquals("target_reply_node_mismatch", runCatching {
-            queuedReplyText(requestId, userId, kotlin.uuid.Uuid.random(), result, MessageRole.USER, userId, replyNode)
+            queuedReplyText(requestId, userId, kotlin.uuid.Uuid.random(), result, replyNode.currentMessage.id, MessageRole.USER, userId, replyNode)
         }.exceptionOrNull()?.message)
         assertEquals("target_reply_message_missing", runCatching {
-            queuedReplyText(requestId, userId, replyNode.id, result.copy(finished = false), MessageRole.USER, userId, replyNode)
+            queuedReplyText(requestId, userId, replyNode.id, result.copy(finished = false), replyNode.currentMessage.id, MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_message_missing", runCatching {
+            queuedReplyText(requestId, userId, replyNode.id, result, kotlin.uuid.Uuid.random(), MessageRole.USER, userId, replyNode)
         }.exceptionOrNull()?.message)
         assertEquals("target_reply_message_missing", runCatching {
             queuedReplyText(
-                requestId, userId, replyNode.id, result, MessageRole.USER, userId,
+                requestId, userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userId,
                 MessageNode(id = replyNode.id, messages = listOf(UIMessage(role = MessageRole.USER, parts = text("wrong role")))),
             )
         }.exceptionOrNull()?.message)
