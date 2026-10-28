@@ -352,6 +352,7 @@ dependencies {
     // debugImplementation(libs.leakcanary.android)
 
     // tests
+    testImplementation(kotlin("test"))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)

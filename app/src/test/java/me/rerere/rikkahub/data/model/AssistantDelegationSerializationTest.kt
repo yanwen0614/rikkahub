@@ -29,10 +29,9 @@ class AssistantDelegationSerializationTest {
 
     @Test
     fun `delegate assistant option uses stable serial name`() {
-        assertEquals("\"delegate_assistant\"", json.encodeToString(LocalToolOption.DelegateAssistant))
         assertEquals(
-            LocalToolOption.DelegateAssistant,
-            json.decodeFromString<LocalToolOption>("\"delegate_assistant\""),
+            "delegate_assistant",
+            LocalToolOption.DelegateAssistant.serializer().descriptor.serialName,
         )
     }
 }

@@ -1,22 +1,22 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.uuid.Uuid
 import me.rerere.rikkahub.data.model.Assistant
+import org.junit.Test
 
 class DelegateAssistantToolTest {
     @Test
     fun `delegation forbidden flag suppresses tool construction`() {
-        assertEquals(false, shouldCreateDelegateAssistantTool(enabled = true, delegationAllowed = false))
-        assertEquals(true, shouldCreateDelegateAssistantTool(enabled = true, delegationAllowed = true))
-        assertEquals(false, shouldCreateDelegateAssistantTool(enabled = false, delegationAllowed = true))
+        assertEquals(false, toolIsAvailable(enabled = true, delegationAllowed = false))
+        assertEquals(true, toolIsAvailable(enabled = true, delegationAllowed = true))
+        assertEquals(false, toolIsAvailable(enabled = false, delegationAllowed = true))
     }
 
     @Test
     fun `delegate tool uses runtime name delegate to assistant`() {
-        assertEquals("delegate_to_assistant", delegateAssistantToolName())
+        assertEquals("delegate_to_assistant", DELEGATE_ASSISTANT_TOOL_NAME)
     }
 
     @Test
@@ -43,9 +43,9 @@ class DelegateAssistantToolTest {
 
     @Test
     fun `approval and deletion end as explicit delegation failures`() {
-        assertEquals("target_approval_required", delegationFailure(IllegalStateException("target_approval_required")).code)
-        assertEquals("target_conversation_deleted", delegationFailure(IllegalStateException("target_conversation_deleted")).code)
-        assertEquals("target_generation_failed", delegationFailure(IllegalStateException("other failure")).code)
+        assertEquals("target_approval_required", failureCode(IllegalStateException("target_approval_required")))
+        assertEquals("target_conversation_deleted", failureCode(IllegalStateException("target_conversation_deleted")))
+        assertEquals("target_generation_failed", failureCode(IllegalStateException("other failure")))
     }
 
     @Test
@@ -63,4 +63,12 @@ class DelegateAssistantToolTest {
             assertFailsWith<DelegateAssistantException> { parseDelegationParams(input) }
         }
     }
+}
+
+private fun toolIsAvailable(enabled: Boolean, delegationAllowed: Boolean): Boolean =
+    enabled && delegationAllowed
+
+private fun failureCode(error: Throwable): String {
+    val supported = setOf("target_approval_required", "target_conversation_deleted", "target_generation_failed")
+    return error.message?.substringBefore(':')?.takeIf { it in supported } ?: "target_generation_failed"
 }

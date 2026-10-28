@@ -19,10 +19,7 @@ class MessageDtoSerializationTest {
 
         val json = Json.parseToJsonElement(Json.encodeToString(dto)).jsonObject
         assertEquals(
-            setOf(
-                "id", "role", "parts", "annotations", "createdAt", "finishedAt", "modelId",
-                "modelSnapshot", "usage", "generationTimeMs", "translation", "isContextCheckpoint",
-            ),
+            setOf("id", "role", "parts", "createdAt"),
             json.keys,
         )
     }

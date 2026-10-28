@@ -19,6 +19,8 @@ import kotlin.uuid.Uuid
 
 class DelegateAssistantException(val code: String) : IllegalArgumentException(code)
 
+const val DELEGATE_ASSISTANT_TOOL_NAME = "delegate_to_assistant"
+
 internal fun delegationFailure(error: Throwable): DelegateAssistantException {
     if (error is DelegateAssistantException) return error
     val code = error.message?.substringBefore(':')?.takeIf {
@@ -58,7 +60,11 @@ internal fun parseDelegationParams(input: String): DelegateAssistantParams {
     val message = obj.string("message") ?: throw DelegateAssistantException("invalid_message")
     val createNew = when (val value = obj["create_new"]) {
         null -> true
-        is JsonPrimitive -> value.booleanOrNull ?: throw DelegateAssistantException("invalid_create_new")
+        is JsonPrimitive -> if (value.isString) {
+            throw DelegateAssistantException("invalid_create_new")
+        } else {
+            value.booleanOrNull ?: throw DelegateAssistantException("invalid_create_new")
+        }
         else -> throw DelegateAssistantException("invalid_create_new")
     }
     val conversationId = when (val value = obj["conversation_id"]) {
@@ -97,7 +103,7 @@ internal fun buildDelegateAssistantTool(
     sourceConversationId: Uuid,
     executor: DelegateAssistantExecutor?,
 ): Tool = Tool(
-    name = delegateAssistantToolName(),
+    name = DELEGATE_ASSISTANT_TOOL_NAME,
     description = "Delegate a message to an assistant that accepts assistant calls. Available assistants: " +
         availableAssistantNames.joinToString(", "),
     parameters = {
@@ -144,5 +150,3 @@ internal fun buildDelegateAssistantTool(
         }
     },
 )
-
-private fun delegateAssistantToolName(): String = "delegate_to_assistant"
