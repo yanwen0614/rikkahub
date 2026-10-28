@@ -11,12 +11,7 @@ import api from "~/services/api";
 import type { ConversationDto, ProviderModel } from "~/types";
 import { AIIcon } from "~/components/ui/ai-icon";
 import { Button } from "~/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTitle,
-  PopoverTrigger,
-} from "~/components/ui/popover";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "~/components/ui/popover";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
@@ -58,7 +53,6 @@ function ModelOptionRow({
   onSelect,
   onToggleFavorite,
 }: ModelOptionRowProps) {
-
   return (
     <div
       role="button"
@@ -96,7 +90,6 @@ function ModelOptionRow({
         <div className="text-muted-foreground truncate text-[11px] leading-tight">
           {model.modelId}
         </div>
-
       </div>
 
       {updating ? (
@@ -189,7 +182,10 @@ export function ModelList({
 
     return sections.find((section) => section.providerId === selectedProviderId) ?? sections[0];
   }, [sections, selectedProviderId]);
-  const filteredModels = React.useMemo(() => sections.flatMap((section) => section.models), [sections]);
+  const filteredModels = React.useMemo(
+    () => sections.flatMap((section) => section.models),
+    [sections],
+  );
 
   const favoriteModels = React.useMemo(() => {
     return favoriteModelIds
@@ -197,7 +193,9 @@ export function ModelList({
       .filter((model): model is ProviderModel => model !== undefined);
   }, [favoriteModelIds, filteredModels]);
   const isFavoriteSectionSelected = selectedProviderId === FAVORITE_SECTION_ID;
-  const displayedModels = isFavoriteSectionSelected ? favoriteModels : (selectedSection?.models ?? []);
+  const displayedModels = isFavoriteSectionSelected
+    ? favoriteModels
+    : (selectedSection?.models ?? []);
 
   const currentModel = React.useMemo(
     () => allModels.find((model) => model.id === currentModelId) ?? null,
@@ -229,13 +227,21 @@ export function ModelList({
       return;
     }
 
-    if (selectedProviderId && sections.some((section) => section.providerId === selectedProviderId)) {
+    if (
+      selectedProviderId &&
+      sections.some((section) => section.providerId === selectedProviderId)
+    ) {
       return;
     }
 
     const currentModelSection =
-      currentModelId == null ? null : sections.find((section) => section.models.some((model) => model.id === currentModelId));
-    setSelectedProviderId(currentModelSection?.providerId ?? (favoriteModels.length > 0 ? FAVORITE_SECTION_ID : sections[0]?.providerId ?? null));
+      currentModelId == null
+        ? null
+        : sections.find((section) => section.models.some((model) => model.id === currentModelId));
+    setSelectedProviderId(
+      currentModelSection?.providerId ??
+        (favoriteModels.length > 0 ? FAVORITE_SECTION_ID : (sections[0]?.providerId ?? null)),
+    );
   }, [currentModelId, favoriteModels.length, open, sections, selectedProviderId]);
 
   React.useEffect(() => {
@@ -275,9 +281,7 @@ export function ModelList({
         setOpen(false);
       } catch (changeError) {
         const message =
-          changeError instanceof Error
-            ? changeError.message
-            : t("model_list.switch_model_failed");
+          changeError instanceof Error ? changeError.message : t("model_list.switch_model_failed");
         setError(message);
       } finally {
         setUpdatingModelId(null);
@@ -346,14 +350,17 @@ export function ModelList({
             className="bg-transparent"
             imageClassName="h-full w-full"
           />
-          <span className="min-w-0 flex-1 truncate text-left">
-            {currentModelLabel}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-left">{currentModelLabel}</span>
           <ChevronDown className="size-3.5 shrink-0" />
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent side="top" align="end" sideOffset={8} className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4">
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4"
+      >
         <PopoverTitle className="text-sm">{t("model_list.title")}</PopoverTitle>
 
         <div className="space-y-3">
@@ -395,7 +402,9 @@ export function ModelList({
                           setSelectedProviderId(FAVORITE_SECTION_ID);
                         }}
                       >
-                        <Heart className={cn("size-3", isFavoriteSectionSelected && "fill-current")} />
+                        <Heart
+                          className={cn("size-3", isFavoriteSectionSelected && "fill-current")}
+                        />
                         <span>{t("model_list.favorites")}</span>
                       </button>
                     )}

@@ -32,10 +32,7 @@ import {
 } from "~/components/ui/drawer";
 import { useIsMobile } from "~/hooks/use-mobile";
 import { resolveFileUrl } from "~/lib/files";
-import type {
-  TextPart as UITextPart,
-  ToolPart as UIToolPart,
-} from "~/types";
+import type { TextPart as UITextPart, ToolPart as UIToolPart } from "~/types";
 
 import { ControlledChainOfThoughtStep } from "../chain-of-thought";
 import { AudioPart as AudioPartRenderer } from "./audio-part";
@@ -45,7 +42,12 @@ import { VideoPart as VideoPartRenderer } from "./video-part";
 interface ToolPartProps {
   tool: UIToolPart;
   loading?: boolean;
-  onToolApproval?: (toolCallId: string, approved: boolean, reason: string, answer?: string) => void | Promise<void>;
+  onToolApproval?: (
+    toolCallId: string,
+    approved: boolean,
+    reason: string,
+    answer?: string,
+  ) => void | Promise<void>;
   isFirst?: boolean;
   isLast?: boolean;
 }
@@ -283,13 +285,7 @@ function parseAskUserQuestions(args: unknown): AskUserQuestion[] {
   }
 }
 
-function AskUserToolStep({
-  tool,
-  loading,
-  onToolApproval,
-  isFirst,
-  isLast,
-}: ToolPartProps) {
+function AskUserToolStep({ tool, loading, onToolApproval, isFirst, isLast }: ToolPartProps) {
   const { t } = useTranslation("message");
   const [expanded, setExpanded] = React.useState(true);
 
@@ -368,9 +364,7 @@ function AskUserToolStep({
       <div className="space-y-3 w-full">
         {questions.map((q) => (
           <div key={q.id} className="space-y-1.5">
-            {questions.length > 1 && (
-              <div className="text-sm text-foreground">{q.question}</div>
-            )}
+            {questions.length > 1 && <div className="text-sm text-foreground">{q.question}</div>}
 
             {isPending && onToolApproval ? (
               <>
@@ -380,16 +374,22 @@ function AskUserToolStep({
                       <button
                         key={option}
                         type="button"
-                        aria-pressed={q.selectionType === "multi"
-                          ? (multiAnswers[q.id] ?? []).includes(option)
-                          : answers[q.id] === option}
-                        onClick={() => q.selectionType === "multi"
-                          ? toggleOption(q.id, option)
-                          : setAnswer(q.id, option)}
-                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                          (q.selectionType === "multi"
+                        aria-pressed={
+                          q.selectionType === "multi"
                             ? (multiAnswers[q.id] ?? []).includes(option)
-                            : answers[q.id] === option)
+                            : answers[q.id] === option
+                        }
+                        onClick={() =>
+                          q.selectionType === "multi"
+                            ? toggleOption(q.id, option)
+                            : setAnswer(q.id, option)
+                        }
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                          (
+                            q.selectionType === "multi"
+                              ? (multiAnswers[q.id] ?? []).includes(option)
+                              : answers[q.id] === option
+                          )
                             ? "border-primary bg-primary/10 text-primary"
                             : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50"
                         }`}
@@ -414,7 +414,9 @@ function AskUserToolStep({
               </>
             ) : isAnswered ? (
               <div className="text-sm text-primary">
-                {answeredValues[q.id] ?? tool.approvalState.type === "answered" ? answeredValues[q.id] || "" : ""}
+                {(answeredValues[q.id] ?? tool.approvalState.type === "answered")
+                  ? answeredValues[q.id] || ""
+                  : ""}
               </div>
             ) : null}
           </div>
@@ -422,12 +424,7 @@ function AskUserToolStep({
 
         {isPending && onToolApproval && (
           <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!allAnswered}
-              onClick={handleSubmit}
-            >
+            <Button size="sm" variant="secondary" disabled={!allAnswered} onClick={handleSubmit}>
               <Send className="mr-1.5 h-3.5 w-3.5" />
               {t("tool_part.ask_user_submit")}
             </Button>
@@ -656,9 +653,12 @@ export function ToolPart({
                         }
                         return <JsonBlock key={i} value={parsed} />;
                       }
-                      if (part.type === "image") return <ImagePartRenderer key={i} url={part.url} />;
-                      if (part.type === "video") return <VideoPartRenderer key={i} url={part.url} />;
-                      if (part.type === "audio") return <AudioPartRenderer key={i} url={part.url} />;
+                      if (part.type === "image")
+                        return <ImagePartRenderer key={i} url={part.url} />;
+                      if (part.type === "video")
+                        return <VideoPartRenderer key={i} url={part.url} />;
+                      if (part.type === "audio")
+                        return <AudioPartRenderer key={i} url={part.url} />;
                       return null;
                     })}
                   </div>

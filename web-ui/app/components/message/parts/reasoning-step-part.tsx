@@ -39,7 +39,12 @@ function formatDuration(createdAt?: string, finishedAt?: string | null): number 
   return Math.round(seconds * 10) / 10;
 }
 
-export function ReasoningStepPart({ reasoning, collapsedAdaptiveWidth = false, isFirst, isLast }: ReasoningStepPartProps) {
+export function ReasoningStepPart({
+  reasoning,
+  collapsedAdaptiveWidth = false,
+  isFirst,
+  isLast,
+}: ReasoningStepPartProps) {
   const loading = reasoning.finishedAt == null;
   const { t } = useTranslation("message");
   const displaySetting = useSettingsStore((state) => state.settings?.displaySetting);
@@ -47,7 +52,10 @@ export function ReasoningStepPart({ reasoning, collapsedAdaptiveWidth = false, i
     ReasoningCardState.Collapsed,
   );
   const contentRef = React.useRef<HTMLDivElement>(null);
-  const thinkingTitle = React.useMemo(() => extractThinkingTitle(reasoning.reasoning), [reasoning.reasoning]);
+  const thinkingTitle = React.useMemo(
+    () => extractThinkingTitle(reasoning.reasoning),
+    [reasoning.reasoning],
+  );
   const showThinkingTitle = loading && thinkingTitle != null;
 
   React.useEffect(() => {
@@ -66,7 +74,12 @@ export function ReasoningStepPart({ reasoning, collapsedAdaptiveWidth = false, i
         ? ReasoningCardState.Collapsed
         : ReasoningCardState.Expanded;
     });
-  }, [loading, reasoning.reasoning, displaySetting?.showThinkingContent, displaySetting?.autoCloseThinking]);
+  }, [
+    loading,
+    reasoning.reasoning,
+    displaySetting?.showThinkingContent,
+    displaySetting?.autoCloseThinking,
+  ]);
 
   React.useEffect(() => {
     if (loading && expandState === ReasoningCardState.Preview && contentRef.current) {
@@ -83,8 +96,8 @@ export function ReasoningStepPart({ reasoning, collapsedAdaptiveWidth = false, i
     setExpandState(nextExpanded ? ReasoningCardState.Expanded : ReasoningCardState.Collapsed);
   };
 
-  const [duration, setDuration] = React.useState<number | null>(
-    () => formatDuration(reasoning.createdAt, reasoning.finishedAt),
+  const [duration, setDuration] = React.useState<number | null>(() =>
+    formatDuration(reasoning.createdAt, reasoning.finishedAt),
   );
 
   React.useEffect(() => {
@@ -123,9 +136,9 @@ export function ReasoningStepPart({ reasoning, collapsedAdaptiveWidth = false, i
           </span>
         }
         extra={
-          showThinkingTitle && duration !== null
-            ? <span className="text-muted-foreground text-xs">{duration.toFixed(1)}s</span>
-            : undefined
+          showThinkingTitle && duration !== null ? (
+            <span className="text-muted-foreground text-xs">{duration.toFixed(1)}s</span>
+          ) : undefined
         }
         contentVisible={expandState !== ReasoningCardState.Collapsed}
       >

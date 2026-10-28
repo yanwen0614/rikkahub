@@ -248,7 +248,12 @@ export function ReasoningPickerButton({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent side="top" sideOffset={8} align="end" className="w-[min(92vw,20rem)] space-y-3 px-4 py-4">
+      <PopoverContent
+        side="top"
+        sideOffset={8}
+        align="end"
+        className="w-[min(92vw,20rem)] space-y-3 px-4 py-4"
+      >
         <PickerErrorAlert error={error} />
 
         {/* Faster / Smarter labels */}
