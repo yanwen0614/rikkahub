@@ -47,7 +47,8 @@ class MessageQueue {
     @Synchronized
     fun enqueue(
         parts: List<UIMessagePart>, answer: Boolean = true,
-        reply: CompletableDeferred<String?>? = null, requestId: Uuid? = null,
+        reply: CompletableDeferred<String?>? = null,
+        requestId: Uuid? = null,
     ) {
         if (parts.isEmptyInputMessage()) {
             reply?.complete(null)

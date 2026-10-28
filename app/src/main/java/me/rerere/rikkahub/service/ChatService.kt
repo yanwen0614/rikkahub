@@ -560,15 +560,23 @@ class ChatService(
                 waiter.fail("target_conversation_deleted")
                 throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
             }
-            target.messageQueue.resume()
-            target.messageQueue.enqueue(
-                listOf(UIMessagePart.Text(request.message)),
-                reply = waiter.deferred,
-                requestId = request.requestId,
-            )
-            itemId = target.messageQueue.state.value.messages.lastOrNull { it.requestId == request.requestId }?.id
-            if (itemId == null) throw IllegalStateException("target_queue_item_missing")
-            dispatchNextQueuedMessage(targetId)
+            synchronized(delegationLifecycleLock) {
+                if (deletingDelegationTargets.containsKey(targetId) ||
+                    sessionManager.get(targetId) !== target || target.incarnation != targetIncarnation
+                ) {
+                    waiter.fail("target_conversation_deleted")
+                    throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
+                }
+                target.messageQueue.resume()
+                target.messageQueue.enqueue(
+                    listOf(UIMessagePart.Text(request.message)),
+                    reply = waiter.deferred,
+                    requestId = request.requestId,
+                )
+                itemId = target.messageQueue.state.value.messages.lastOrNull { it.requestId == request.requestId }?.id
+                    ?: throw IllegalStateException("target_queue_item_missing")
+                dispatchNextQueuedMessage(targetId)
+            }
             val text = waiter.await() ?: throw IllegalStateException("target_generation_failed")
             return listOf(UIMessagePart.Text("conversation_id: $targetId\n$text"))
         } catch (e: CancellationException) {
@@ -1208,19 +1216,23 @@ class ChatService(
      */
     suspend fun deleteConversation(conversationId: Uuid) {
         val session = sessionManager.getOrCreate(conversationId)
+        val deletingIncarnation = session.incarnation
         synchronized(delegationLifecycleLock) {
-            deletingDelegationTargets[conversationId] = session.incarnation
+            deletingDelegationTargets[conversationId] = deletingIncarnation
         }
-        failDelegationsForSession(session)
-        discardQueuedMessages(session)
-        session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
-            conversationRepo.getConversationById(conversationId)?.let { conversationRepo.deleteConversation(it) }
-            // 数据库那份不知道只在内存里出现过的附件
-            previous?.let { filesManager.deleteChatFiles(it.files) }
-        }
-        synchronized(delegationLifecycleLock) {
-            if (deletingDelegationTargets[conversationId] == session.incarnation - 1) {
-                deletingDelegationTargets.remove(conversationId)
+        try {
+            failDelegationsForSession(session)
+            discardQueuedMessages(session)
+            session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
+                conversationRepo.getConversationById(conversationId)?.let { conversationRepo.deleteConversation(it) }
+                // 数据库那份不知道只在内存里出现过的附件
+                previous?.let { filesManager.deleteChatFiles(it.files) }
+            }
+        } finally {
+            synchronized(delegationLifecycleLock) {
+                if (deletingDelegationTargets[conversationId] == deletingIncarnation) {
+                    deletingDelegationTargets.remove(conversationId)
+                }
             }
         }
         sessionManager.removeIfIdle(session)
