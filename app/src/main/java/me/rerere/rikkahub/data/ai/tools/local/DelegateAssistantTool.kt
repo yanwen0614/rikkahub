@@ -34,6 +34,7 @@ fun shouldCreateDelegateAssistantTool(enabled: Boolean, delegationAllowed: Boole
 data class DelegateAssistantRequest(
     val sourceAssistantId: Uuid,
     val sourceConversationId: Uuid,
+    val assistantName: String,
     val assistant: Assistant,
     val message: String,
     val conversationId: Uuid?,
@@ -96,6 +97,21 @@ internal fun resolveDelegateAssistant(
     }
 }
 
+internal fun revalidateDelegateAssistant(
+    assistants: List<Assistant>,
+    expectedAssistantId: Uuid,
+    requestedName: String,
+): Assistant {
+    val matches = assistants.filter { it.name == requestedName }
+    if (matches.isEmpty()) throw DelegateAssistantException("unknown_assistant")
+    if (matches.size > 1) throw DelegateAssistantException("ambiguous_assistant_name")
+    return matches.single().also {
+        if (it.id != expectedAssistantId || !it.acceptsAssistantCalls) {
+            throw DelegateAssistantException("assistant_not_allowed")
+        }
+    }
+}
+
 internal fun buildDelegateAssistantTool(
     settingsStore: SettingsStore,
     availableAssistantNames: List<String>,
@@ -134,6 +150,7 @@ internal fun buildDelegateAssistantTool(
                 DelegateAssistantRequest(
                     sourceAssistantId = sourceAssistantId,
                     sourceConversationId = sourceConversationId,
+                    assistantName = params.assistantName,
                     assistant = assistant,
                     message = params.message,
                     conversationId = params.conversationId,

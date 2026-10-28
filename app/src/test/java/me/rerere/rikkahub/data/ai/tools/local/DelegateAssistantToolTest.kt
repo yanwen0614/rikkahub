@@ -42,6 +42,24 @@ class DelegateAssistantToolTest {
     }
 
     @Test
+    fun `execution revalidation rejects renamed ambiguous or disabled target`() {
+        val expected = Assistant(name = "Original", acceptsAssistantCalls = true)
+        assertFailsWith<DelegateAssistantException> {
+            revalidateDelegateAssistant(listOf(expected.copy(name = "Renamed")), expected.id, "Original")
+        }.also { assertEquals("unknown_assistant", it.code) }
+        assertFailsWith<DelegateAssistantException> {
+            revalidateDelegateAssistant(
+                listOf(expected, Assistant(name = "Original", acceptsAssistantCalls = true)),
+                expected.id,
+                "Original",
+            )
+        }.also { assertEquals("ambiguous_assistant_name", it.code) }
+        assertFailsWith<DelegateAssistantException> {
+            revalidateDelegateAssistant(listOf(expected.copy(acceptsAssistantCalls = false)), expected.id, "Original")
+        }.also { assertEquals("assistant_not_allowed", it.code) }
+    }
+
+    @Test
     fun `approval and deletion end as explicit delegation failures`() {
         assertEquals("target_approval_required", failureCode(IllegalStateException("target_approval_required")))
         assertEquals("target_conversation_deleted", failureCode(IllegalStateException("target_conversation_deleted")))

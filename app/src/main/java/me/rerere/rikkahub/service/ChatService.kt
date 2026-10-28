@@ -49,6 +49,7 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
 import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantExecutor
+import me.rerere.rikkahub.data.ai.tools.local.revalidateDelegateAssistant
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -555,9 +556,11 @@ class ChatService(
         var itemId: Uuid? = null
         try {
             val latestSettings = settingsStore.awaitLoaded()
-            val targetAssistant = latestSettings.assistants.firstOrNull { it.id == request.assistant.id }
-                ?: throw IllegalStateException("target_assistant_missing")
-            if (!targetAssistant.acceptsAssistantCalls) throw IllegalStateException("assistant_not_allowed")
+            val targetAssistant = revalidateDelegateAssistant(
+                assistants = latestSettings.assistants,
+                expectedAssistantId = request.assistant.id,
+                requestedName = request.assistantName,
+            )
             val conversation = if (request.createNew) {
                 target.initialize(
                     load = { null },
