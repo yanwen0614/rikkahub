@@ -81,7 +81,6 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             ?: return@withContext Result.failure(IllegalArgumentException("query is required"))
         val topic = params["topic"]?.jsonPrimitive?.contentOrNull ?: "general"
 
-<<<<<<< HEAD
         // Validate topic
         if (topic !in listOf("general", "news", "finance")) {
             return@withContext Result.failure(IllegalArgumentException("topic must be one of `general`, `news`, `finance`"))
