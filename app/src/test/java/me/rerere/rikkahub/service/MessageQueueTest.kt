@@ -2,7 +2,10 @@ package me.rerere.rikkahub.service
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.MessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,6 +14,49 @@ import org.junit.Test
 
 class MessageQueueTest {
     private fun text(value: String) = listOf(UIMessagePart.Text(value))
+
+    @Test
+    fun `queued reply correlation requires matching request user and assistant reply`() {
+        val requestId = kotlin.uuid.Uuid.random()
+        val userId = kotlin.uuid.Uuid.random()
+        val userNode = UIMessage(id = userId, role = MessageRole.USER, parts = text("request")).toMessageNode()
+        val replyNode = UIMessage(role = MessageRole.ASSISTANT, parts = text("answer")).toMessageNode()
+        val result = ChatServiceQueuedTurnResult(requestId, userId, replyNode.id, finished = true)
+
+        assertEquals("answer", queuedReplyText(requestId, userId, replyNode.id, result, MessageRole.USER, userId, replyNode))
+        assertEquals("target_request_mismatch", runCatching {
+            queuedReplyText(kotlin.uuid.Uuid.random(), userId, replyNode.id, result, MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_user_message_mismatch", runCatching {
+            queuedReplyText(requestId, userId, replyNode.id, result, MessageRole.USER, userNode.id, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_node_mismatch", runCatching {
+            queuedReplyText(requestId, userId, kotlin.uuid.Uuid.random(), result, MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_message_missing", runCatching {
+            queuedReplyText(requestId, userId, replyNode.id, result.copy(finished = false), MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_message_missing", runCatching {
+            queuedReplyText(
+                requestId, userId, replyNode.id, result, MessageRole.USER, userId,
+                MessageNode(id = replyNode.id, messages = listOf(UIMessage(role = MessageRole.USER, parts = text("wrong role")))),
+            )
+        }.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `assigning request ids returns unique delegation ids while normal replies stay unassigned`() {
+        val queue = MessageQueue()
+        val first = queue.enqueue(text("first delegation"), assignRequestId = true)
+        val second = queue.enqueue(text("second delegation"), assignRequestId = true)
+        val voiceReply = CompletableDeferred<String?>()
+        val voice = queue.enqueue(text("voice reply"), reply = voiceReply)
+
+        assertTrue(first?.requestId != null)
+        assertTrue(second?.requestId != null)
+        assertFalse(first?.requestId == second?.requestId)
+        assertNull(voice?.requestId)
+    }
 
     @Test
     fun `delegation correlation stays on the dispatched item and pending removal fails only its waiter`() = runBlocking {

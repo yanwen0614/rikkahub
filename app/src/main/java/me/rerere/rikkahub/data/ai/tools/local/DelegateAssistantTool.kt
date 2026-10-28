@@ -14,6 +14,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Assistant
+import kotlinx.coroutines.CancellationException
 import kotlin.uuid.Uuid
 
 class DelegateAssistantException(val code: String) : IllegalArgumentException(code)
@@ -36,7 +37,6 @@ data class DelegateAssistantRequest(
     val message: String,
     val conversationId: Uuid?,
     val createNew: Boolean,
-    val requestId: Uuid = Uuid.random(),
 )
 
 /** Execution is deliberately injected by the owner of cross-session lifecycle and session safety. */
@@ -89,7 +89,7 @@ internal fun buildDelegateAssistantTool(
     sourceConversationId: Uuid,
     executor: DelegateAssistantExecutor?,
 ): Tool = Tool(
-    name = "delegate_assistant",
+    name = delegateAssistantToolName(),
     description = "Delegate a message to an assistant that accepts assistant calls. Available assistants: " +
         availableAssistantNames.joinToString(", "),
     parameters = {
@@ -116,7 +116,6 @@ internal fun buildDelegateAssistantTool(
             }.map { it.name }
             if (assistant.name !in enabledNames) throw DelegateAssistantException("assistant_not_allowed")
             val boundExecutor = executor ?: throw DelegateAssistantException("executor_not_bound")
-            val requestId = Uuid.random()
             val output = boundExecutor.execute(
                 DelegateAssistantRequest(
                     sourceAssistantId = sourceAssistantId,
@@ -125,14 +124,17 @@ internal fun buildDelegateAssistantTool(
                     message = params.message,
                     conversationId = params.conversationId,
                     createNew = params.createNew,
-                    requestId = requestId,
                 )
             )
             output
         } catch (e: DelegateAssistantException) {
+            throw e
+        } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             throw delegationFailure(e)
         }
     },
 )
+
+private fun delegateAssistantToolName(): String = "delegate_to_assistant"

@@ -121,7 +121,12 @@ class ChatService(
 ) {
     /** 一轮生成的结果 */
     private sealed interface TurnResult {
-        data class Finished(val reason: AgentFinishReason, val replyNodeId: Uuid?) : TurnResult
+        data class Finished(
+            val reason: AgentFinishReason,
+            val requestId: Uuid?,
+            val userMessageId: Uuid?,
+            val replyNodeId: Uuid?,
+        ) : TurnResult
 
         /** 没能完成：错误已经报告给用户，消息队列也已暂停 */
         data object Failed : TurnResult
@@ -449,21 +454,25 @@ class ChatService(
                         messageNodes = it.messageNodes + UIMessage(
                             role = MessageRole.USER,
                             parts = processedContent,
-                        ).toMessageNode(),
+                        ).let { message ->
+                            if (queued.requestId != null) message.copy(id = queued.id) else message
+                        }.toMessageNode(),
                     )
                 }
-                queued.userMessageId = session.state.value.currentMessages.lastOrNull()?.id
+                queued.userMessageId = queued.id
                 session.flush()
                 session.submittingMessage = null
 
                 // 开始补全
-                val executor = if (queued.requestId == null) {
+                    val executor = if (queued.requestId == null) {
                     DelegateAssistantExecutor { request -> executeDelegation(request) }
                 } else null
                 val result = if (queued.answer) runTurn(
                     session,
                     delegationAllowed = queued.requestId == null,
                     delegateAssistantExecutor = executor,
+                    expectedRequestId = queued.requestId,
+                    expectedUserMessageId = queued.userMessageId,
                 ) else null
                 queued.replyNodeId = (result as? TurnResult.Finished)?.replyNodeId
                 queued.reply?.completeWith(runCatching {
@@ -477,14 +486,31 @@ class ChatService(
                     if (finished?.reason is AgentFinishReason.AwaitingApproval) {
                         if (queued.requestId != null) throw IllegalStateException("target_approval_required")
                         else throw IllegalStateException(context.getString(R.string.chat_page_voice_tool_approval))
-                    } else finished?.replyNodeId?.let { replyId ->
-                        checkNotNull(queued.userMessageId) { "target_user_message_missing" }
-                        check(session.state.value.getMessageNodeByMessageId(queued.userMessageId!!) != null) {
-                            "target_user_message_missing"
+                    } else finished?.let { turn ->
+                        val replyNode = turn.replyNodeId?.let { id ->
+                            session.state.value.messageNodes.firstOrNull { it.id == id }
                         }
-                        val replyNode = session.state.value.messageNodes.firstOrNull { it.id == replyId }
-                        check(replyNode?.currentMessage?.role == MessageRole.ASSISTANT) { "target_reply_message_missing" }
-                        replyNode.currentMessage.toText()
+                        if (queued.requestId == null) {
+                            replyNode?.takeIf { it.currentMessage.role == MessageRole.ASSISTANT }
+                                ?.currentMessage?.toText().orEmpty()
+                        } else queuedReplyText(
+                            queuedRequestId = queued.requestId,
+                            queuedUserMessageId = queued.userMessageId,
+                            queuedReplyNodeId = queued.replyNodeId,
+                            result = ChatServiceQueuedTurnResult(
+                                requestId = turn.requestId,
+                                userMessageId = turn.userMessageId,
+                                replyNodeId = turn.replyNodeId,
+                                finished = turn.reason !is AgentFinishReason.AwaitingApproval,
+                            ),
+                                currentUserRole = queued.userMessageId?.let { userId ->
+                                    session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.role
+                                },
+                                currentUserMessageId = queued.userMessageId?.let { userId ->
+                                    session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.id
+                                },
+                            replyNode = replyNode,
+                        )
                     }.orEmpty()
                 })
                 // Voice owns playback, including when its observer has already left the page.
@@ -522,13 +548,10 @@ class ChatService(
         }
         val waiter = DelegationWaiter()
         val targetIncarnation = target.incarnation
-        synchronized(delegationLifecycleLock) {
-            if (deletingDelegationTargets.containsKey(targetId) || sessionManager.get(targetId) !== target) {
-                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
-            }
-            delegationWaiters[request.requestId] = waiter
-            delegationTargets[request.requestId] = targetId
+        if (deletingDelegationTargets.containsKey(targetId) || sessionManager.get(targetId) !== target) {
+            throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
         }
+        var requestId: Uuid? = null
         var itemId: Uuid? = null
         try {
             val latestSettings = settingsStore.awaitLoaded()
@@ -571,10 +594,13 @@ class ChatService(
                 target.messageQueue.enqueue(
                     listOf(UIMessagePart.Text(request.message)),
                     reply = waiter.deferred,
-                    requestId = request.requestId,
-                )
-                itemId = target.messageQueue.state.value.messages.lastOrNull { it.requestId == request.requestId }?.id
-                    ?: throw IllegalStateException("target_queue_item_missing")
+                    assignRequestId = true,
+                )?.let { queued ->
+                    requestId = checkNotNull(queued.requestId)
+                    itemId = queued.id
+                    delegationWaiters[queued.requestId!!] = waiter
+                    delegationTargets[queued.requestId!!] = targetId
+                } ?: throw IllegalStateException("target_queue_item_missing")
                 dispatchNextQueuedMessage(targetId)
             }
             val text = waiter.await() ?: throw IllegalStateException("target_generation_failed")
@@ -595,8 +621,10 @@ class ChatService(
             }
             throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_generation_failed")
         } finally {
-            delegationWaiters.remove(request.requestId, waiter)
-            delegationTargets.remove(request.requestId, targetId)
+            requestId?.let { id ->
+                delegationWaiters.remove(id, waiter)
+                delegationTargets.remove(id, targetId)
+            }
         }
     }
 
@@ -709,6 +737,8 @@ class ChatService(
         regenerateNodeId: Uuid? = null,
         delegationAllowed: Boolean = true,
         delegateAssistantExecutor: DelegateAssistantExecutor? = null,
+        expectedRequestId: Uuid? = null,
+        expectedUserMessageId: Uuid? = null,
     ): TurnResult {
         val conversationId = session.id
         // 先清理上一轮状态；确定历史后，仅为真正的续写恢复消息 ID。
@@ -734,6 +764,12 @@ class ChatService(
                 conversation.currentMessages.take(index)
             } else {
                 conversation.currentMessages
+            }
+            if (expectedRequestId != null || expectedUserMessageId != null) {
+                val lastHistory = history.lastOrNull()
+                check(expectedRequestId != null && expectedUserMessageId != null &&
+                    lastHistory?.id == expectedUserMessageId && lastHistory.role == MessageRole.USER
+                ) { "target_user_message_mismatch" }
             }
             val replyNodeId = when {
                 history.lastOrNull()?.role == MessageRole.ASSISTANT -> nodes[history.lastIndex].id
@@ -804,7 +840,7 @@ class ChatService(
                 sessionManager.launchWithSession(conversationId) { generateSuggestion(conversationId) }
                 if (turn.assistant.enableMemory) memoryConsolidationScheduler.onTurnFinished(session.state.value)
             }
-            return TurnResult.Finished(reason, replyNodeId)
+            return TurnResult.Finished(reason, expectedRequestId, expectedUserMessageId, replyNodeId)
         } catch (e: CancellationException) {
             appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
             throw e
@@ -1409,3 +1445,30 @@ class ChatService(
         if (session.isInitialized) finishInterruptedPendingTools(session)
     }
 }
+
+internal fun queuedReplyText(
+    queuedRequestId: Uuid?,
+    queuedUserMessageId: Uuid?,
+    queuedReplyNodeId: Uuid?,
+    result: ChatServiceQueuedTurnResult,
+    currentUserRole: MessageRole?,
+    currentUserMessageId: Uuid?,
+    replyNode: MessageNode?,
+): String {
+    check(queuedRequestId != null && result.requestId == queuedRequestId) { "target_request_mismatch" }
+    check(queuedUserMessageId != null && result.userMessageId == queuedUserMessageId &&
+        currentUserMessageId == queuedUserMessageId && currentUserRole == MessageRole.USER
+    ) { "target_user_message_mismatch" }
+    check(queuedReplyNodeId != null && result.replyNodeId == queuedReplyNodeId) { "target_reply_node_mismatch" }
+    check(result.finished && replyNode?.id == queuedReplyNodeId &&
+        replyNode.currentMessage.role == MessageRole.ASSISTANT
+    ) { "target_reply_message_missing" }
+    return replyNode.currentMessage.toText()
+}
+
+internal data class ChatServiceQueuedTurnResult(
+    val requestId: Uuid?,
+    val userMessageId: Uuid?,
+    val replyNodeId: Uuid?,
+    val finished: Boolean,
+)

@@ -49,19 +49,22 @@ class MessageQueue {
         parts: List<UIMessagePart>, answer: Boolean = true,
         reply: CompletableDeferred<String?>? = null,
         requestId: Uuid? = null,
-    ) {
+        assignRequestId: Boolean = false,
+    ): QueuedMessage? {
         if (parts.isEmptyInputMessage()) {
             reply?.complete(null)
-            return
+            return null
         }
-        mutableState.value = state.value.copy(
-            messages = state.value.messages + QueuedMessage(
-                parts = parts.toList(),
-                answer = answer,
-                reply = reply,
-                requestId = requestId,
-            ),
+        val queued = QueuedMessage(
+            parts = parts.toList(),
+            answer = answer,
+            reply = reply,
+            requestId = requestId ?: if (assignRequestId) Uuid.random() else null,
         )
+        mutableState.value = state.value.copy(
+            messages = state.value.messages + queued,
+        )
+        return queued
     }
 
     @Synchronized

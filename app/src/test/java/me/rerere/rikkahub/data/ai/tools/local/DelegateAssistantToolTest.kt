@@ -15,6 +15,11 @@ class DelegateAssistantToolTest {
     }
 
     @Test
+    fun `delegate tool uses runtime name delegate to assistant`() {
+        assertEquals("delegate_to_assistant", delegateAssistantToolName())
+    }
+
+    @Test
     fun `assistant name resolution counts all exact matches before checking permissions`() {
         val source = Assistant(name = "Source")
         val allowed = Assistant(name = "Target", acceptsAssistantCalls = true)
