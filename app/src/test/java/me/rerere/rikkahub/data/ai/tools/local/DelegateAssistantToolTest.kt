@@ -9,9 +9,9 @@ import org.junit.Test
 class DelegateAssistantToolTest {
     @Test
     fun `delegation forbidden flag suppresses tool construction`() {
-        assertEquals(false, toolIsAvailable(enabled = true, delegationAllowed = false))
-        assertEquals(true, toolIsAvailable(enabled = true, delegationAllowed = true))
-        assertEquals(false, toolIsAvailable(enabled = false, delegationAllowed = true))
+        assertEquals(false, shouldCreateDelegateAssistantTool(enabled = true, delegationAllowed = false))
+        assertEquals(true, shouldCreateDelegateAssistantTool(enabled = true, delegationAllowed = true))
+        assertEquals(false, shouldCreateDelegateAssistantTool(enabled = false, delegationAllowed = true))
     }
 
     @Test
@@ -66,9 +66,6 @@ class DelegateAssistantToolTest {
         }
     }
 }
-
-private fun toolIsAvailable(enabled: Boolean, delegationAllowed: Boolean): Boolean =
-    enabled && delegationAllowed
 
 private fun failureCode(error: Throwable): String {
     val supported = setOf("target_approval_required", "target_conversation_deleted", "target_generation_failed")

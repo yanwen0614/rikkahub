@@ -29,8 +29,7 @@ internal fun delegationFailure(error: Throwable): DelegateAssistantException {
     return DelegateAssistantException(code)
 }
 
-internal fun shouldCreateDelegateAssistantTool(enabled: Boolean, delegationAllowed: Boolean): Boolean =
-    enabled && delegationAllowed
+fun shouldCreateDelegateAssistantTool(enabled: Boolean, delegationAllowed: Boolean): Boolean = enabled && delegationAllowed
 
 data class DelegateAssistantRequest(
     val sourceAssistantId: Uuid,

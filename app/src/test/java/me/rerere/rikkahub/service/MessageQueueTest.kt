@@ -95,15 +95,17 @@ class MessageQueueTest {
     fun `removing a still queued delegation by item id does not affect a started waiter`() = runBlocking {
         val queue = MessageQueue()
         val pendingReply = CompletableDeferred<String?>()
-        queue.enqueue(text("pending"), reply = pendingReply, requestId = kotlin.uuid.Uuid.random())
+        val pending = queue.enqueue(text("pending"), reply = pendingReply, requestId = kotlin.uuid.Uuid.random())!!
         val pendingId = queue.state.value.messages.single().id
-        queue.removeById(pendingId)
+        val removed = queue.removeByIdAndFail(pendingId, "delegation_wait_cancelled")
+        assertEquals(pending.id, removed?.id)
+        assertEquals("delegation_wait_cancelled", runCatching { pendingReply.await() }.exceptionOrNull()?.message)
 
         val startedReply = CompletableDeferred<String?>()
         queue.enqueue(text("started"), reply = startedReply, requestId = kotlin.uuid.Uuid.random())
         val started = queue.takeNext()!!
         assertTrue(startedReply.isActive)
-        assertEquals(null, queue.removeById(started.id))
+        assertEquals(null, queue.removeByIdAndFail(started.id, "delegation_wait_cancelled"))
         assertTrue(startedReply.isActive)
     }
 
