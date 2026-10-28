@@ -620,10 +620,11 @@ class ChatService(
                     reply = waiter.deferred,
                     assignRequestId = true,
                 )?.let { queued ->
-                    requestId = checkNotNull(queued.requestId)
+                    val queuedRequestId = checkNotNull(queued.requestId)
+                    requestId = queuedRequestId
                     itemId = queued.id
-                    delegationWaiters[queued.requestId!!] = waiter
-                    delegationTargets[queued.requestId!!] = targetId
+                    delegationWaiters[queuedRequestId] = waiter
+                    delegationTargets[queuedRequestId] = targetId
                 } ?: throw IllegalStateException("target_queue_item_missing")
                 dispatchNextQueuedMessage(targetId)
             }
