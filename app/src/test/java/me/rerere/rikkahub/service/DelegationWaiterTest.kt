@@ -3,6 +3,7 @@ package me.rerere.rikkahub.service
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException
 import org.junit.Assert.assertEquals
@@ -32,5 +33,33 @@ class DelegationWaiterTest {
         sourceWaiter.cancel(CancellationException("source cancelled"))
         assertTrue(targetJob.isActive)
         targetJob.cancel()
+    }
+
+    @Test
+    fun `concurrent success and failure produce one consistent terminal result`() = runTest {
+        repeat(100) {
+            val waiter = DelegationWaiter()
+            val start = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val succeed = async(Dispatchers.Default) {
+                start.await()
+                waiter.succeed("answer")
+            }
+            val fail = async(Dispatchers.Default) {
+                start.await()
+                waiter.fail("target_generation_failed")
+            }
+            start.complete(Unit)
+            val won = listOf(succeed.await(), fail.await()).count { it }
+            assertEquals(1, won)
+
+            val outcome = runCatching { waiter.await() }
+            if (outcome.isSuccess) {
+                assertEquals("answer", outcome.getOrNull())
+                assertEquals(null, waiter.terminalErrorCode)
+            } else {
+                assertEquals("target_generation_failed", waiter.terminalErrorCode)
+                assertTrue(outcome.exceptionOrNull() is DelegateAssistantException)
+            }
+        }
     }
 }
