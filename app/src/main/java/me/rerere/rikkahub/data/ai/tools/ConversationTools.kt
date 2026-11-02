@@ -68,6 +68,61 @@ fun createConversationTools(
         }
     ),
     conversationSearchTool { query -> conversationRepo.searchMessages(query, MessageSearchSort.RELEVANCE) },
+    Tool(
+        name = "conversation_read",
+        description = """
+            Read the user and assistant messages of one conversation, by position.
+            Only user and assistant text is returned; reasoning content and tool call results are excluded.
+            Use it when a search snippet needs surrounding context, or to read a full conversation.
+        """.trimIndent(),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("conversation_id", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Id of the conversation to read")
+                    })
+                    put("offset", buildJsonObject {
+                        put("type", "integer")
+                        put("description", "Position of the first message to return (default: 0)")
+                    })
+                    put("limit", buildJsonObject {
+                        put("type", "integer")
+                        put(
+                            "description",
+                            "Maximum messages to return (default: $READ_DEFAULT_LIMIT, max: $READ_MAX_LIMIT)"
+                        )
+                    })
+                },
+                required = listOf("conversation_id")
+            )
+        },
+        execute = {
+            val args = it.jsonObject
+            val conversation = args["conversation_id"]?.jsonPrimitive?.contentOrNull
+                ?.let { id -> runCatching { Uuid.parse(id) }.getOrNull() }
+                ?.let { id -> conversationRepo.getConversationById(id) }
+                ?: error("conversation not found")
+            val offset = (args["offset"]?.jsonPrimitive?.intOrNull ?: 0).coerceAtLeast(0)
+            val limit = (args["limit"]?.jsonPrimitive?.intOrNull ?: READ_DEFAULT_LIMIT).coerceIn(1, READ_MAX_LIMIT)
+            val messages = conversation.dialogueMessages()
+            val payload = buildJsonObject {
+                put("title", conversation.title.ifBlank { "Untitled" })
+                put("total", messages.size)
+                put("messages", buildJsonArray {
+                    messages.drop(offset).take(limit).forEachIndexed { index, message ->
+                        add(buildJsonObject {
+                            put("position", offset + index)
+                            put("role", message.role.name)
+                            put("date", message.createdAt.date.toString())
+                            put("text", message.toDisplayText(READ_MESSAGE_LENGTH))
+                        })
+                    }
+                })
+            }
+            listOf(UIMessagePart.Text(payload.toString()))
+        }
+    ),
 )
 
 private fun conversationSearchTool(search: suspend (query: String) -> List<MessageSearchResult>) = Tool(
@@ -188,3 +243,24 @@ fun createMemoryConversationTools(
 /** 当前分支上用户和助手的消息，位置编号以这个列表为准 */
 internal fun Conversation.dialogueMessages(): List<UIMessage> =
     currentMessages.filter { it.role == MessageRole.USER || it.role == MessageRole.ASSISTANT }
+
+/**
+ * 提取消息中供模型阅读的文本，排除 Reasoning（思考）和 Tool（工具调用及其结果）。
+ * 媒体文件用占位符表示，提示模型有附件但不暴露内部路径。
+ */
+private fun UIMessage.toDisplayText(limit: Int): String {
+    return parts.filterNot { part ->
+        part is UIMessagePart.Reasoning ||
+            part is UIMessagePart.Tool ||
+            part is UIMessagePart.ServerTool
+    }.joinToString("\n") { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text
+            is UIMessagePart.Image -> "[Image]"
+            is UIMessagePart.Video -> "[Video]"
+            is UIMessagePart.Audio -> "[Audio]"
+            is UIMessagePart.Document -> "[Document: ${part.fileName}]"
+            else -> ""
+        }
+    }.take(limit)
+}
