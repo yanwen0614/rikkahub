@@ -1389,6 +1389,8 @@
   <string name="assistant_page_local_tools_chart_display_desc">Let the AI display line, bar, and scatter charts</string>
   <string name="assistant_page_accept_assistant_calls_title">Accept calls from other assistants</string>
   <string name="assistant_page_accept_assistant_calls_desc">Allow other assistants to delegate tasks to this assistant</string>
+  <string name="assistant_page_delegation_description_title">Delegation description</string>
+  <string name="assistant_page_delegation_description_desc">Tell other assistants what this assistant is good at, so they can delegate the right tasks</string>
   <string name="assistant_page_local_tools_delegate_assistant_title">Delegate Assistant</string>
   <string name="assistant_page_local_tools_delegate_assistant_desc">Let this assistant ask another assistant to complete a task</string>
   <string name="chat_message_tool_chart_display">Display chart</string>
@@ -1799,4 +1801,7 @@
   <string name="setting_model_page_memory_model">Memory Consolidation Model</string>
   <string name="setting_model_page_memory_model_desc">Model used to organize conversations into long-term memory in the background; uses the fast model when not set</string>
   <string name="setting_model_page_memory_model_follow_fast">Same as fast model</string>
+  <string name="chat_delegation_result_from">Reply from %1$s</string>
+  <string name="chat_delegation_failed_from">Delegated task for %1$s failed</string>
+  <string name="chat_page_queue_delegation_delivery">Waiting to deliver a delegated result</string>
 </resources>

@@ -6,12 +6,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -186,6 +188,23 @@ private fun AssistantLocalToolContent(
                     Text(stringResource(R.string.assistant_page_accept_assistant_calls_title))
                 },
             )
+            if (assistant.acceptsAssistantCalls) {
+                formItem(
+                    headlineContent = {
+                        Text(stringResource(R.string.assistant_page_delegation_description_title))
+                    },
+                    supportingContent = {
+                        Text(stringResource(R.string.assistant_page_delegation_description_desc))
+                    },
+                ) {
+                    OutlinedTextField(
+                        value = assistant.delegationDescription,
+                        onValueChange = { onUpdate(assistant.copy(delegationDescription = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                }
+            }
         }
         CardGroup {
             toolItem(

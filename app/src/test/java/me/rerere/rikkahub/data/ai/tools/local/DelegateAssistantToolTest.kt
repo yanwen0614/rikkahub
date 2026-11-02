@@ -1,10 +1,10 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
+import me.rerere.rikkahub.data.model.Assistant
+import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.uuid.Uuid
-import me.rerere.rikkahub.data.model.Assistant
-import org.junit.Test
 
 class DelegateAssistantToolTest {
     @Test
@@ -17,6 +17,23 @@ class DelegateAssistantToolTest {
     @Test
     fun `delegate tool uses runtime name delegate to assistant`() {
         assertEquals("delegate_to_assistant", DELEGATE_ASSISTANT_TOOL_NAME)
+    }
+
+    @Test
+    fun `available assistants listing includes delegation descriptions`() {
+        val assistants = listOf(
+            Assistant(name = "foo", acceptsAssistantCalls = true, delegationDescription = "擅长翻译"),
+            Assistant(name = "bar", acceptsAssistantCalls = true, delegationDescription = "   "),
+            Assistant(name = "baz", acceptsAssistantCalls = true),
+        )
+
+        assertEquals(
+            "- foo: 擅长翻译\n- bar\n- baz",
+            formatDelegateAssistantList(assistants),
+        )
+        val toolDescription = buildDelegateAssistantDescription(assistants)
+        assertEquals(true, toolDescription.contains("- foo: 擅长翻译"))
+        assertEquals(true, toolDescription.contains("- bar"))
     }
 
     @Test
@@ -70,7 +87,12 @@ class DelegateAssistantToolTest {
     fun `delegation params enforce creation conversation rules and UUID`() {
         val conversationId = Uuid.random()
         assertEquals(true, parseDelegationParams("""{"assistant_name":"Target","message":"Hi"}""").createNew)
-        assertEquals(conversationId, parseDelegationParams("""{"assistant_name":"Target","message":"Hi","create_new":false,"conversation_id":"$conversationId"}""").conversationId)
+        assertEquals(
+            conversationId,
+            parseDelegationParams(
+                """{"assistant_name":"Target","message":"Hi","create_new":false,"conversation_id":"$conversationId"}"""
+            ).conversationId
+        )
         listOf(
             """{"assistant_name":"Target","message":"Hi","conversation_id":"$conversationId"}""",
             """{"assistant_name":"Target","message":"Hi","create_new":false}""",

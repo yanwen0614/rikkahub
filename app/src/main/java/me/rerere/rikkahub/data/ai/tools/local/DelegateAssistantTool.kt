@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,7 +10,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import kotlinx.coroutines.CancellationException
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
@@ -29,7 +29,8 @@ internal fun delegationFailure(error: Throwable): DelegateAssistantException {
     return DelegateAssistantException(code)
 }
 
-fun shouldCreateDelegateAssistantTool(enabled: Boolean, delegationAllowed: Boolean): Boolean = enabled && delegationAllowed
+fun shouldCreateDelegateAssistantTool(enabled: Boolean, delegationAllowed: Boolean): Boolean =
+    enabled && delegationAllowed
 
 data class DelegateAssistantRequest(
     val sourceAssistantId: Uuid,
@@ -70,7 +71,13 @@ internal fun parseDelegationParams(input: String): DelegateAssistantParams {
     val conversationId = when (val value = obj["conversation_id"]) {
         null -> null
         is JsonPrimitive -> value.contentOrNull
-            ?.let { runCatching { Uuid.parse(it) }.getOrElse { throw DelegateAssistantException("invalid_conversation_id") } }
+            ?.let {
+                runCatching {
+                    Uuid.parse(
+                        it
+                    )
+                }.getOrElse { throw DelegateAssistantException("invalid_conversation_id") }
+            }
             ?: throw DelegateAssistantException("invalid_conversation_id")
         else -> throw DelegateAssistantException("invalid_conversation_id")
     }
@@ -112,16 +119,27 @@ internal fun revalidateDelegateAssistant(
     }
 }
 
+internal fun formatDelegateAssistantList(assistants: List<Assistant>): String =
+    assistants.joinToString("\n") { assistant ->
+        val description = assistant.delegationDescription.trim()
+        if (description.isEmpty()) "- ${assistant.name}" else "- ${assistant.name}: $description"
+    }
+
+internal fun buildDelegateAssistantDescription(assistants: List<Assistant>): String =
+    "Delegate a message to an assistant that accepts assistant calls. This returns immediately: " +
+        "the task runs asynchronously and its result is delivered later as a new message, so do not wait for it. " +
+        "Choose by the assistant's delegation description when present. Available assistants:\n" +
+        formatDelegateAssistantList(assistants)
+
 internal fun buildDelegateAssistantTool(
     settingsStore: SettingsStore,
-    availableAssistantNames: List<String>,
+    availableAssistants: List<Assistant>,
     sourceAssistantId: Uuid,
     sourceConversationId: Uuid,
     executor: DelegateAssistantExecutor?,
 ): Tool = Tool(
     name = DELEGATE_ASSISTANT_TOOL_NAME,
-    description = "Delegate a message to an assistant that accepts assistant calls. Available assistants: " +
-        availableAssistantNames.joinToString(", "),
+    description = buildDelegateAssistantDescription(availableAssistants),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {

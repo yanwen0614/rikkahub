@@ -43,6 +43,7 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { ChatMessageAnnotationsRow } from "./chat-message-annotations";
 import { ChatMessageAvatarRow } from "./chat-message-avatar-row";
+import { ChatMessageDelegationHeader, readDelegationInfo } from "./chat-message-delegation";
 import { MessageParts } from "./message-part";
 
 interface ChatMessageProps {
@@ -635,7 +636,7 @@ export const ChatMessage = React.memo(
   }: ChatMessageProps) => {
     const isUser = message.role === "USER";
     const hasMessageContent = message.parts.some(hasRenderablePart);
-    const showActions = isLastMessage ? !loading : hasMessageContent;
+    const delegationInfo = React.useMemo(() => readDelegationInfo(message.parts), [message.parts]);
     const citationUrlMap = React.useMemo(() => buildCitationUrlMap(message.parts), [message.parts]);
     const handleClickCitation = React.useCallback(
       (citationId: string) => {
@@ -650,12 +651,18 @@ export const ChatMessage = React.memo(
       return <ChatMessageContextCheckpoint message={message} onEdit={onEdit} onDelete={onDelete} />;
     }
 
+    // 委托结果：来源抬头只在 UI 显示，正文里没有这段文字，发给模型时也不会带上
+    const showActions = (isLastMessage ? !loading : hasMessageContent) && !delegationInfo;
+
     return (
       <div
         className={cn("flex flex-col gap-4", isUser ? "items-end" : "items-start")}
         data-message-role={message.role.toLowerCase()}
         data-message-loading={loading || undefined}
       >
+        {delegationInfo ? (
+          <ChatMessageDelegationHeader info={delegationInfo} className="ml-px" />
+        ) : null}
         <div className="flex w-full flex-col gap-2">
           <ChatMessageAvatarRow
             message={message}

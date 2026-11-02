@@ -53,6 +53,7 @@ data class Assistant(
     val timeReminderIntervalMinutes: Int = 60, // 时间提醒间隔（分钟，至少 1 分钟）
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val acceptsAssistantCalls: Boolean = false,
+    val delegationDescription: String = "", // 仅用于委托工具的语义调度描述
 )
 
 @Serializable

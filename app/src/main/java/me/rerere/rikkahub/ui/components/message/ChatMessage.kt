@@ -78,6 +78,8 @@ import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.delegationFailureCode
+import me.rerere.rikkahub.data.model.delegationSourceName
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -151,6 +153,14 @@ fun ChatMessage(
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        // 委托结果：来源抬头只在这里显示，正文里没有这段文字，发给模型时也不会带上
+        message.delegationSourceName()?.let { sourceName ->
+            DelegationResultHeader(
+                assistantName = sourceName,
+                failed = message.delegationFailureCode() != null,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
         if (!message.parts.isEmptyUIMessage()) {
             Row(
                 modifier = Modifier
@@ -201,7 +211,7 @@ fun ChatMessage(
             !loading
         } else {
             message.parts.isEmptyUIMessage().not()
-        }
+        } && message.delegationSourceName() == null // 委托结果是系统投递的，不给重新生成/编辑入口
 
         val motionScheme = MaterialTheme.motionScheme
         AnimatedVisibility(

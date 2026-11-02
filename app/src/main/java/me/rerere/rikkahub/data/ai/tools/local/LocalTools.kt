@@ -3,8 +3,8 @@ package me.rerere.rikkahub.data.ai.tools.local
 import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.tts.provider.TTSManager
 
 class LocalTools(
@@ -72,9 +72,8 @@ class LocalTools(
             tools.add(
                 buildDelegateAssistantTool(
                     settingsStore = settingsStore,
-                    availableAssistantNames = settings.assistants
-                        .filter { it.id != sourceAssistantId && it.acceptsAssistantCalls }
-                        .map { it.name },
+                    availableAssistants = settings.assistants
+                        .filter { it.id != sourceAssistantId && it.acceptsAssistantCalls },
                     sourceAssistantId = sourceAssistantId,
                     sourceConversationId = sourceConversationId,
                     executor = delegateAssistantExecutor,

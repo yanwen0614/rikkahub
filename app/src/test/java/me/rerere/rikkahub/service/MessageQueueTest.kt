@@ -276,6 +276,73 @@ class MessageQueueTest {
     }
 
     @Test
+    fun `delegation delivery is queued behind the current turn and carries its result message`() {
+        val queue = MessageQueue()
+        queue.enqueue(text("user turn"))
+        val result = UIMessage(
+            role = MessageRole.USER,
+            parts = text("delegated result"),
+        )
+        queue.enqueueDelivery(result)
+
+        val first = queue.takeNext()!!
+        assertFalse(first.deliverOnly)
+        val delivery = queue.takeNext()!!
+        assertTrue(delivery.deliverOnly)
+        assertEquals(result, delivery.deliveryMessage)
+        assertEquals(emptyList<UIMessagePart>(), delivery.parts)
+        assertNull(delivery.requestId)
+        assertFalse(delivery.deliveryWritten)
+        assertNull(queue.takeNext())
+    }
+
+    @Test
+    fun `delivery enqueued after an inline write is not written twice`() {
+        val queue = MessageQueue()
+        val result = UIMessage.user("delegated result")
+        val queued = queue.enqueueDelivery(result, written = true)
+
+        assertTrue(queued.deliveryWritten)
+        assertTrue(queue.takeNext()!!.deliveryWritten)
+    }
+
+    @Test
+    fun `delegation delivery waits for a paused queue and survives reprocessing`() {
+        val queue = MessageQueue()
+        val result = UIMessage.user("delegated result")
+        queue.enqueueDelivery(result)
+        queue.pause()
+        assertNull(queue.takeNext())
+        assertEquals(1, queue.state.value.messages.size)
+
+        queue.resume()
+        assertEquals(result, queue.takeNext()!!.deliveryMessage)
+    }
+
+    @Test
+    fun `delegation delivery is not blocked by editing a real queued message`() {
+        val queue = MessageQueue()
+        queue.enqueue(text("first"))
+        queue.enqueueDelivery(UIMessage.user("delegated result"))
+        val firstId = queue.state.value.messages.first().id
+        queue.beginEdit(firstId)
+
+        assertNull(queue.takeNext())
+        queue.finishEdit(firstId, text("edited"))
+        assertEquals(text("edited"), queue.takeNext()!!.parts)
+        assertTrue(queue.takeNext()!!.deliverOnly)
+    }
+
+    @Test
+    fun `delegation pending text tells the model not to wait`() {
+        val text = delegationPendingText("Target", kotlin.uuid.Uuid.random())
+        assertTrue(text.contains("Delegated to 'Target'"))
+        assertTrue(text.contains("conversation_id: "))
+        assertTrue(text.contains("do NOT wait"))
+        assertTrue(text.contains("delivered"))
+    }
+
+    @Test
     fun `queues are isolated per conversation`() {
         val first = MessageQueue()
         val second = MessageQueue()

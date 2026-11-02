@@ -21,6 +21,8 @@ import me.rerere.rikkahub.data.ai.prompts.buildMemoryPrompt
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantExecutor
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
+import me.rerere.rikkahub.data.ai.transformers.DelegationMessageTransformer
+import me.rerere.rikkahub.data.ai.transformers.DelegationReminderMergeTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
@@ -82,6 +84,8 @@ class ChatRequestFactory(
     workspaceRepository: WorkspaceRepository,
 ) {
     private val inputTransformers: List<InputMessageTransformer> = listOf(
+        // 先把委托结果改写成 synthetic USER：之后的时间提醒/模板等转换器才会按用户消息处理它
+        DelegationMessageTransformer,
         TimeReminderTransformer,
         PromptInjectionTransformer,
         PlaceholderTransformer,
@@ -89,6 +93,8 @@ class ChatRequestFactory(
         OcrTransformer,
         templateTransformer,
         WorkspaceReminderTransformer(workspaceRepository),
+        // 放在最后：模板/占位符都处理完再把委托提醒并进用户消息，提醒不会被助手模板二次改写
+        DelegationReminderMergeTransformer,
     )
 
     private val outputTransformers: List<OutputMessageTransformer> = listOf(

@@ -1797,4 +1797,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_model_page_memory_model">记忆整理模型</string>
   <string name="setting_model_page_memory_model_desc">用于在后台将对话整理为长期记忆的模型；未设置时使用快速模型</string>
   <string name="setting_model_page_memory_model_follow_fast">跟随快速模型</string>
+  <string name="chat_delegation_result_from">来自 %1$s 的回复</string>
+  <string name="chat_delegation_failed_from">委托给 %1$s 的任务失败</string>
+  <string name="chat_page_queue_delegation_delivery">等待投递委托结果</string>
 </resources>
