@@ -12,3 +12,14 @@ local.properties
 .history
 .kotlin
 .worktrees
+
+# Android release signing key, generated locally / from secrets.KEY_BASE64 in CI
+app.key
+app/app.key
+*.jks
+*.keystore
+
+# Build and tool output
+highlight/build
+__pycache__
+*.pyc

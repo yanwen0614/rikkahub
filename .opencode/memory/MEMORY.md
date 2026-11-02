@@ -2,6 +2,18 @@
 
 ## Architecture & Decisions
 
+### 跨助手会话委托（分支 openchamber/feat-delegate-assistant）
+- 工具 `delegate_to_assistant`（`app/.../data/ai/tools/local/DelegateAssistantTool.kt`），目标助手需 `acceptsAssistantCalls = true` 且非源助手；按 `name` 精确匹配，重名报 `ambiguous_assistant_name`
+- **助手描述字段（语义调度）**：`Assistant.delegationDescription: String = ""`（紧邻 `acceptsAssistantCalls`），仅用于委托工具描述，**不是**通用 description；`buildDelegateAssistantDescription` / `formatDelegateAssistantList` 拼成 `Available assistants:\n- foo: 擅长翻译\n- bar`；编辑入口在 `AssistantLocalToolPage.kt`（开关打开时才显示）
+- **异步委托**：`executeDelegation` 只做 `dispatchDelegation`（建/取目标会话 + enqueue + `dispatchNextQueuedMessage`）并立刻返回 `delegationPendingText(...)` 回执，明确告诉模型 "do NOT wait"；真正的等待在后台 `appScope.launch { awaitAndDeliverDelegation }`，用 `delegationDeliveryJobs`(源会话→jobs) 登记、源会话删除时 `cancelDelegationDeliveries` 取消
+- **结果投递**：`delegationResultMessage(...)`（`data/model/DelegationMessages.kt`）生成 `role=SYSTEM` 消息，正文是目标回复纯文本，来源信息只在 `UIMessagePart.Text.metadata`：`delegatedFrom` / `delegationConversationId` / `delegationFailure` / `delegationReminder`
+  - **UI-only 抬头**：`ChatMessage.kt` → `DelegationResultHeader`（Compose，`ChatMessageDelegation.kt`）/ web-ui `chat-message-delegation.tsx` 读 metadata 渲染「来自 xxx 的回复」，文字不在正文里
+  - **model-visible 提醒**：`DelegationMessageTransformer`（`inputTransformers` 链首）把 SYSTEM 改写成 `synthetic USER` + `<delegation_result source_assistant="..." conversation_id="..." [status="failed" error="..."]>`；换 role 是因为 Claude/Gemini/Responses API 只取第一条 SYSTEM，历史里的 SYSTEM 会被丢弃
+- **自动续写**：投递后 `messageQueue.enqueueDelivery(...)` + `dispatchNextQueuedMessage(源会话)`，源空闲则先写历史再续写；`QueuedMessage.deliveryMessage/deliveryWritten/deliverOnly` 承载；队列面板显示「等待投递委托结果」，不可编辑/删除
+- **防无限往返**：`MAX_DELEGATION_CONTINUATIONS = 8` + `delegationContinuations`(源会话→计数)，只在真正派出新委托时 `merge(+1)`，非投递轮次清零；达上限后该轮不提供委托工具。目标轮仍 `delegationAllowed = false`（一层递归限制）
+- 失败码：`target_approval_required` / `target_conversation_deleted` / `target_generation_failed`，失败也投递并由 `delegationFailureText` 转成说明
+- **校验**：`:app:compileGithubDebugKotlin` + `:app:testGithubDebugUnitTest`（540 tests）通过；web-ui `tsc --noEmit` 通过
+
 ### ui 模块下沉（通用组件）
 - 上游 `7c011317 refactor(ui): 把不依赖 app 逻辑的通用组件下沉到 ui 模块` 新增 `:ui` 模块，把 app 里不依赖 app 逻辑的组件迁过去并改包名
 - 迁移映射：app `me.rerere.rikkahub.ui.components.ui.{BitmapComposer,ConfirmDialog,DotLoading,Form,Input,ListSelectableItem,Select,StickyHeader,Switch,ToggleSurface,Tooltip}` → `me.rerere.ui.components.*`；`charts/*` → `me.rerere.ui.charts.*`；`icons/*` → `me.rerere.ui.icons.*`；`richtext/DiffView` → `me.rerere.ui.richtext.*`；`table/DataTable`、`webview/*`、`easteregg/EmojiBurst`、新增 `sketch/*` 同理
@@ -41,6 +53,7 @@
 - 构建：`./gradlew.bat assembleRelease` 产出 `app/build/outputs/apk/release/` 下 arm64-v8a / x86_64 / universal 三个 APK
 - **子模块 material-color-utilities**：`material3` 模块用 `kotlin.srcDir("material-color-utilities/kotlin")` 直接编译其源码；本地该目录**无 `.git` 元数据**（git 视为未初始化），`git fetch`/`git submodule update` 会报 `Could not access submodule` 并返回非 0 退出码，但**不影响 assembleRelease**；本地源码已含 `ColorSpec2025.kt` / `SpecVersion.SPEC_2025`，与上游 `5b3618b` 的 2025 色彩规范一致
 - `git fetch origin dev/refactor` 时显式指定分支只更新 `FETCH_HEAD`，需 `git update-ref refs/remotes/origin/dev/refactor <sha>` 或后续 fetch 刷新 remote-tracking ref
+- **spotless 会格式化整个仓库**：本仓库 `spotlessApply` 会改几十个无关文件，跑完必须 `git checkout` 还原非本次改动文件；`spotlessCheck` 当前在 `ai/.../Provider.kt`、`ChatCompletionsAPI.kt` 有分支既有违规
 
 ## Bug Fixes
 
