@@ -1,6 +1,6 @@
 import type { ComponentPropsWithRef } from "react";
 
-export default function Logo(props: ComponentPropsWithRef<'svg'>) {
+export default function Logo(props: ComponentPropsWithRef<"svg">) {
   return (
     <svg
       version="1.2"

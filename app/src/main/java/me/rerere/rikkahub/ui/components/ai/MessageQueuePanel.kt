@@ -85,14 +85,18 @@ internal fun MessageQueuePanel(
                                 stringResource(R.string.chat_page_queue_video),
                             )
                             Text(
-                                text = "${index + 1}. " + message.parts.joinToString(" ") {
-                                    when (it) {
-                                        is UIMessagePart.Text -> it.text
-                                        is UIMessagePart.Image -> attachmentLabels[0]
-                                        is UIMessagePart.Document -> attachmentLabels[1]
-                                        is UIMessagePart.Audio -> attachmentLabels[2]
-                                        is UIMessagePart.Video -> attachmentLabels[3]
-                                        else -> ""
+                                text = "${index + 1}. " + if (message.deliverOnly) {
+                                    stringResource(R.string.chat_page_queue_delegation_delivery)
+                                } else {
+                                    message.parts.joinToString(" ") {
+                                        when (it) {
+                                            is UIMessagePart.Text -> it.text
+                                            is UIMessagePart.Image -> attachmentLabels[0]
+                                            is UIMessagePart.Document -> attachmentLabels[1]
+                                            is UIMessagePart.Audio -> attachmentLabels[2]
+                                            is UIMessagePart.Video -> attachmentLabels[3]
+                                            else -> ""
+                                        }
                                     }
                                 },
                                 modifier = Modifier.weight(1f),
@@ -100,14 +104,24 @@ internal fun MessageQueuePanel(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            TextButton(
-                                enabled = !message.isEditing,
-                                onClick = { editing = onBeginEdit(message.id) },
-                            ) { Text(if (message.isEditing) stringResource(R.string.chat_page_queue_editing) else stringResource(R.string.edit)) }
-                            TextButton(
-                                enabled = !message.isEditing,
-                                onClick = { onRemove(message.id) },
-                            ) { Text(stringResource(R.string.chat_page_queue_remove)) }
+                            if (!message.deliverOnly) {
+                                TextButton(
+                                    enabled = !message.isEditing,
+                                    onClick = { editing = onBeginEdit(message.id) },
+                                ) {
+                                    Text(
+                                        if (message.isEditing) stringResource(R.string.chat_page_queue_editing)
+                                        else stringResource(R.string.edit)
+                                    )
+                                }
+                            }
+                            // 委托结果不能移除：正在生成时它还没写进历史，移除会静默丢掉结果
+                            if (!message.deliverOnly) {
+                                TextButton(
+                                    enabled = !message.isEditing,
+                                    onClick = { onRemove(message.id) },
+                                ) { Text(stringResource(R.string.chat_page_queue_remove)) }
+                            }
                         }
                     }
                 }

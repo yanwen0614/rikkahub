@@ -12,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.completeWith
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +25,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.ai.agent.AgentEvent
 import me.rerere.ai.agent.AgentFinishReason
@@ -46,6 +50,8 @@ import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
+import me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantExecutor
+import me.rerere.rikkahub.data.ai.tools.local.revalidateDelegateAssistant
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -54,8 +60,10 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.bindConfig
 import me.rerere.rikkahub.data.model.cancelInterruptedTools
+import me.rerere.rikkahub.data.model.delegationResultMessage
 import me.rerere.rikkahub.data.model.deleteMessage
 import me.rerere.rikkahub.data.model.editMessage
 import me.rerere.rikkahub.data.model.fillModelSnapshots
@@ -84,9 +92,13 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
+
+// 一个源会话因委托结果连续自动续写的最大次数；超过后那一轮不再提供委托工具，防止助手间无限往返
+private const val MAX_DELEGATION_CONTINUATIONS = 8
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -117,7 +129,13 @@ class ChatService(
 ) {
     /** 一轮生成的结果 */
     private sealed interface TurnResult {
-        data class Finished(val reason: AgentFinishReason) : TurnResult
+        data class Finished(
+            val reason: AgentFinishReason,
+            val requestId: Uuid?,
+            val userMessageId: Uuid?,
+            val replyNodeId: Uuid?,
+            val finalMessageId: Uuid?,
+        ) : TurnResult
 
         /** 没能完成：错误已经报告给用户，消息队列也已暂停 */
         data object Failed : TurnResult
@@ -151,6 +169,21 @@ class ChatService(
         onGenerationFinished = ::onSessionGenerationFinished,
         onSessionRemoved = memoryConsolidationScheduler::onConversationLeft,
     )
+    private val delegationWaiters = ConcurrentHashMap<Uuid, DelegationWaiter>()
+    private val delegationTargets = ConcurrentHashMap<Uuid, Uuid>()
+    private val deletingDelegationTargets = ConcurrentHashMap<Uuid, Int>()
+
+    // 源会话 -> 还在等目标结果的投递任务；删除源会话时取消，避免向已删除的会话写回内容
+    private val delegationDeliveryJobs = ConcurrentHashMap<Uuid, MutableSet<Job>>()
+
+    // requestId -> 源会话：删除源会话时据此让等待中的 waiter 立刻结束
+    private val delegationSources = ConcurrentHashMap<Uuid, Uuid>()
+    private val delegationLifecycleLock = Any()
+    private val delegateCreateLock = Mutex()
+
+    // 源会话连续自动续写的次数。委托结果会触发源助手再来一轮，若这一轮又委托，结果回来又会续写；
+    // 两个互相可调用的助手会因此无限往返。达到上限后那一轮不再提供委托工具。
+    private val delegationContinuations = ConcurrentHashMap<Uuid, Int>()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -186,6 +219,9 @@ class ChatService(
         // 取消只来自停止（已自行暂停）或删除，这里再暂停会盖掉停止后用户发送时恢复的队列
         if (cause != null && cause !is CancellationException) session.messageQueue.pause()
         if (session.state.value.isAwaitingToolApproval) {
+            delegationTargets.entries.filter { it.value == session.id }.forEach { entry ->
+                delegationWaiters[entry.key]?.fail("target_approval_required")
+            }
             session.messageQueue.failReplyWaiters(context.getString(R.string.chat_page_voice_tool_approval))
         }
         appScope.launch { dispatchNextQueuedMessage(session.id) }
@@ -428,33 +464,112 @@ class ChatService(
                 ensureInitialized(session)
                 finishInterruptedPendingTools(session)
 
-                val assistant = settingsStore.awaitLoaded().getStoredAssistantOf(session.state.value)
-                val processedContent = queued.parts.replaceUserRegexes(assistant)
+                val deliveryMessage = queued.deliveryMessage
+                if (deliveryMessage != null) {
+                    // 结果已经在投递时写过（会话当时空闲）就不再重复；否则此刻补写
+                    if (!queued.deliveryWritten) {
+                        session.update { conversation ->
+                            conversation.copy(
+                                messageNodes = conversation.messageNodes + deliveryMessage.toMessageNode(),
+                                chatSuggestions = emptyList(),
+                            )
+                        }
+                        queued.deliveryWritten = true
+                        session.flush()
+                    }
+                } else {
+                    val assistant = settingsStore.awaitLoaded().getStoredAssistantOf(session.state.value)
+                    val processedContent = queued.parts.replaceUserRegexes(assistant)
 
-                // 添加消息到列表
-                val previousIds = session.state.value.currentMessages.mapTo(HashSet()) { it.id }
-                session.update {
-                    it.copy(
-                        messageNodes = it.messageNodes + UIMessage(
-                            role = MessageRole.USER,
-                            parts = processedContent,
-                        ).toMessageNode(),
+                    // 添加消息到列表
+                    val userMessage = UIMessage(
+                        role = MessageRole.USER,
+                        parts = processedContent,
                     )
+                    session.update {
+                        it.copy(
+                            messageNodes = it.messageNodes + userMessage.toMessageNode(),
+                        )
+                    }
+                    queued.userMessageId = userMessage.id
+                    session.flush()
                 }
-                session.flush()
                 session.submittingMessage = null
 
                 // 开始补全
-                val result = if (queued.answer) runTurn(session) else null
-
+                // 委托结果触发的续写轮次允许继续委托（主管助手要能串行委派多个 worker），
+                // 但连续自动续写有上限，避免两个互相可调用的助手一来一往无限回填、持续消耗 token。
+                // 计数只在真正派出新委托时增加（见 executeDelegation）；非投递轮次（用户消息/目标轮次）清零。
+                if (queued.deliveryMessage == null) delegationContinuations.remove(session.id)
+                val continuationDepth = delegationContinuations[session.id] ?: 0
+                val delegationAllowed = queued.requestId == null &&
+                    continuationDepth < MAX_DELEGATION_CONTINUATIONS
+                val executor = if (delegationAllowed) {
+                    DelegateAssistantExecutor { request -> executeDelegation(request) }
+                } else {
+                    null
+                }
+                val result = if (queued.answer) {
+                    runTurn(
+                        session,
+                        delegationAllowed = delegationAllowed,
+                        delegateAssistantExecutor = executor,
+                        expectedRequestId = queued.requestId,
+                        expectedUserMessageId = queued.userMessageId,
+                    )
+                } else {
+                    null
+                }
+                queued.replyNodeId = (result as? TurnResult.Finished)?.replyNodeId
                 queued.reply?.completeWith(runCatching {
-                    check(result != TurnResult.Failed) { context.getString(R.string.chat_page_voice_generation_failed) }
-                    check((result as? TurnResult.Finished)?.reason !is AgentFinishReason.AwaitingApproval) {
-                        context.getString(R.string.chat_page_voice_tool_approval)
+                    if (result == TurnResult.Failed) {
+                        throw IllegalStateException(
+                            if (queued.requestId != null) {
+                                "target_generation_failed"
+                            } else {
+                                context.getString(R.string.chat_page_voice_generation_failed)
+                            }
+                        )
                     }
-                    session.state.value.currentMessages
-                        .filter { it.id !in previousIds && it.role == MessageRole.ASSISTANT }
-                        .joinToString("\n") { it.toText() }
+                    val finished = result as? TurnResult.Finished
+                    if (finished?.reason is AgentFinishReason.AwaitingApproval) {
+                        if (queued.requestId != null) {
+                            throw IllegalStateException("target_approval_required")
+                        } else {
+                            throw IllegalStateException(context.getString(R.string.chat_page_voice_tool_approval))
+                        }
+                    } else {
+                        finished?.let { turn ->
+                            val replyNode = turn.replyNodeId?.let { id ->
+                                session.state.value.messageNodes.firstOrNull { it.id == id }
+                            }
+                            if (queued.requestId == null) {
+                                replyNode?.takeIf { it.currentMessage.role == MessageRole.ASSISTANT }
+                                    ?.currentMessage?.toText().orEmpty()
+                            } else {
+                                queuedReplyText(
+                                    queuedRequestId = queued.requestId,
+                                    queuedUserMessageId = queued.userMessageId,
+                                    queuedReplyNodeId = queued.replyNodeId,
+                                    result = ChatServiceQueuedTurnResult(
+                                        requestId = turn.requestId,
+                                        userMessageId = turn.userMessageId,
+                                        replyNodeId = turn.replyNodeId,
+                                        finished = isDelegationTurnCompleted(turn.reason),
+                                        finalMessageId = turn.finalMessageId,
+                                    ),
+                                    finalMessageId = turn.finalMessageId,
+                                    currentUserRole = queued.userMessageId?.let { userId ->
+                                        session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.role
+                                    },
+                                    currentUserMessageId = queued.userMessageId?.let { userId ->
+                                        session.state.value.getMessageNodeByMessageId(userId)?.currentMessage?.id
+                                    },
+                                    replyNode = replyNode,
+                                )
+                            }
+                        }.orEmpty()
+                    }
                 })
                 // Voice owns playback, including when its observer has already left the page.
                 // The ordinary autoplay collector must not read a late voice reply again.
@@ -473,6 +588,278 @@ class ChatService(
         }
         session.setJob(job)
         return job
+    }
+
+    /**
+     * 委托是异步的：这里只同步把消息排到目标会话并返回一张“已受理”回执，
+     * 真正的结果由后台协程 [awaitAndDeliverDelegation] 等到后投回源会话。
+     */
+    private suspend fun executeDelegation(
+        request: me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantRequest,
+    ): List<UIMessagePart> {
+        val sourceId = request.sourceConversationId
+        // 结果可能很久以后才回来：一直持有源会话引用，防止它在等待期间被回收后重建出另一个实例
+        val sourceSession = sessionManager.acquire(sourceId)
+        val dispatch = try {
+            dispatchDelegation(request, sourceSession)
+        } catch (e: Throwable) {
+            sessionManager.release(sourceId)
+            throw e
+        }
+        val job = appScope.launch {
+            try {
+                awaitAndDeliverDelegation(request, dispatch)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+                addError(e, sourceId)
+            }
+        }
+        // 只有真正派出了新委托才计入自动续写链；连续委托链条太长时下一轮不再提供委托工具
+        delegationContinuations.merge(sourceId, 1, Int::plus)
+        synchronized(delegationLifecycleLock) {
+            delegationDeliveryJobs.getOrPut(sourceId) { mutableSetOf() }.add(job)
+        }
+        job.invokeOnCompletion {
+            synchronized(delegationLifecycleLock) {
+                delegationDeliveryJobs[sourceId]?.let { jobs ->
+                    jobs.remove(job)
+                    if (jobs.isEmpty()) delegationDeliveryJobs.remove(sourceId)
+                }
+            }
+            sessionManager.release(sourceId)
+        }
+        return listOf(UIMessagePart.Text(delegationPendingText(request.assistantName, dispatch.targetId)))
+    }
+
+    private data class DelegationOutcome(val text: String?, val failure: String?)
+
+    private data class DelegationDispatch(
+        val targetId: Uuid,
+        val targetAssistantName: String,
+        val waiter: DelegationWaiter,
+        val requestId: Uuid,
+        val sourceSession: ConversationSession,
+        val sourceIncarnation: Int,
+    )
+
+    /** 建立目标会话并把请求排进它的消息队列；返回定位结果所需的信息，不等待目标生成。 */
+    private suspend fun dispatchDelegation(
+        request: me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantRequest,
+        sourceSession: ConversationSession,
+    ): DelegationDispatch {
+        val targetId = request.conversationId ?: Uuid.random()
+        val target = if (request.createNew) {
+            delegateCreateLock.withLock {
+                check(!conversationRepo.existsConversationById(targetId) && sessionManager.get(targetId) == null) {
+                    "target_conversation_id_collision"
+                }
+                sessionManager.acquire(targetId)
+            }
+        } else {
+            sessionManager.acquire(targetId)
+        }
+        val waiter = DelegationWaiter()
+        val targetIncarnation = target.incarnation
+        var requestId: Uuid? = null
+        var itemId: Uuid? = null
+        try {
+            if (deletingDelegationTargets.containsKey(targetId) || sessionManager.get(targetId) !== target) {
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
+            }
+            val latestSettings = settingsStore.awaitLoaded()
+            val targetAssistant = revalidateDelegateAssistant(
+                assistants = latestSettings.assistants,
+                expectedAssistantId = request.assistant.id,
+                requestedName = request.assistantName,
+            )
+            val conversation = if (request.createNew) {
+                target.initialize(
+                    load = { null },
+                    create = {
+                        Conversation.ofId(targetId, assistantId = targetAssistant.id, newConversation = true)
+                            .updateCurrentMessages(targetAssistant.presetMessages)
+                            .bindConfig(latestSettings)
+                            .fillModelSnapshots(latestSettings)
+                    },
+                )
+                target.state.value
+            } else {
+                target.initialize(
+                    load = { loadConversation(targetId) },
+                    create = { throw NotFoundException("Conversation not found") },
+                )
+                target.state.value
+            }
+            if (conversation.assistantId != targetAssistant.id) {
+                throw IllegalStateException("conversation_assistant_mismatch")
+            }
+            if (sessionManager.get(targetId) !== target || target.incarnation != targetIncarnation) {
+                waiter.fail("target_conversation_deleted")
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_conversation_deleted")
+            }
+            synchronized(delegationLifecycleLock) {
+                if (deletingDelegationTargets.containsKey(targetId) ||
+                    sessionManager.get(targetId) !== target || target.incarnation != targetIncarnation
+                ) {
+                    waiter.fail("target_conversation_deleted")
+                    throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException(
+                        "target_conversation_deleted"
+                    )
+                }
+                target.messageQueue.resume()
+                target.messageQueue.enqueue(
+                    listOf(UIMessagePart.Text(request.message)),
+                    reply = waiter.deferred,
+                    assignRequestId = true,
+                )?.let { queued ->
+                    val queuedRequestId = checkNotNull(queued.requestId)
+                    requestId = queuedRequestId
+                    itemId = queued.id
+                    delegationWaiters[queuedRequestId] = waiter
+                    delegationTargets[queuedRequestId] = targetId
+                    delegationSources[queuedRequestId] = request.sourceConversationId
+                } ?: throw IllegalStateException("target_queue_item_missing")
+                dispatchNextQueuedMessage(targetId)
+            }
+            return DelegationDispatch(
+                targetId = targetId,
+                targetAssistantName = request.assistantName,
+                waiter = waiter,
+                requestId = checkNotNull(requestId),
+                sourceSession = sourceSession,
+                sourceIncarnation = sourceSession.incarnation,
+            )
+        } catch (e: CancellationException) {
+            // Remove only while pending. Once dequeued, target generation owns its lifecycle.
+            itemId?.let { id ->
+                target.messageQueue.removeByIdAndFail(id, "delegation_wait_cancelled")
+            }
+            requestId?.let { id ->
+                delegationWaiters.remove(id, waiter)
+                delegationTargets.remove(id, targetId)
+                delegationSources.remove(id, request.sourceConversationId)
+            }
+            throw e
+        } catch (e: Exception) {
+            itemId?.let { id ->
+                target.messageQueue.removeByIdAndFail(id, "delegation_dispatch_failed")
+            }
+            requestId?.let { id ->
+                delegationWaiters.remove(id, waiter)
+                delegationTargets.remove(id, targetId)
+                delegationSources.remove(id, request.sourceConversationId)
+            }
+            if (e is me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException) throw e
+            if (e.message in setOf("target_approval_required", "target_conversation_deleted")) {
+                throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException(e.message!!)
+            }
+            throw me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantException("target_generation_failed")
+        } finally {
+            // 目标会话由它自己的生成任务保活，排队之后就可以释放引用
+            sessionManager.release(targetId)
+        }
+    }
+
+    /**
+     * 等目标轮结束，把结果或失败原因投回源会话，并排一个后续轮次让源助手继续说话。
+     *
+     * 目标那一轮被用户停掉时 waiter 也会收到 CancellationException；只有投递任务自己（源会话被删）被取消
+     * 才直接退出，目标的取消按失败结果投递，不能静默丢掉。
+     */
+    private suspend fun awaitAndDeliverDelegation(
+        request: me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantRequest,
+        dispatch: DelegationDispatch,
+    ) {
+        val outcome = try {
+            dispatch.waiter.await()
+                ?.let { DelegationOutcome(text = it, failure = null) }
+                ?: DelegationOutcome(text = null, failure = "target_generation_failed")
+        } catch (e: CancellationException) {
+            // 投递任务自己被取消（源会话被删）时不再投递；目标的取消按失败结果投递
+            currentCoroutineContext().ensureActive()
+            DelegationOutcome(text = null, failure = dispatch.waiter.terminalErrorCode ?: "target_generation_failed")
+        } catch (e: Exception) {
+            DelegationOutcome(
+                text = null,
+                failure = dispatch.waiter.terminalErrorCode
+                    ?: me.rerere.rikkahub.data.ai.tools.local.delegationFailure(e).code,
+            )
+        }
+        try {
+            deliverDelegationResult(
+                request = request,
+                dispatch = dispatch,
+                text = outcome.text,
+                failure = outcome.failure,
+            )
+        } finally {
+            withContext(NonCancellable) {
+                delegationWaiters.remove(dispatch.requestId, dispatch.waiter)
+                delegationTargets.remove(dispatch.requestId, dispatch.targetId)
+                delegationSources.remove(dispatch.requestId, request.sourceConversationId)
+            }
+        }
+    }
+
+    /**
+     * 把结果排进源会话：源会话空闲时立即写进历史（队列暂停时用户也能看到），并排一个续写队列项；
+     * 正在生成/等审批时只排队，等这一轮结束再写，不会插到未完成的工具调用之间。
+     * 下一轮请求把结果当成 `<delegation_result>` 提醒发给模型。源会话被删除或整条替换时丢弃。
+     */
+    private suspend fun deliverDelegationResult(
+        request: me.rerere.rikkahub.data.ai.tools.local.DelegateAssistantRequest,
+        dispatch: DelegationDispatch,
+        text: String?,
+        failure: String?,
+    ) {
+        val sourceId = request.sourceConversationId
+        val message = delegationResultMessage(
+            assistantName = dispatch.targetAssistantName,
+            conversationId = dispatch.targetId,
+            text = text.orEmpty(),
+            failure = failure,
+        )
+        val delivered = sessionManager.withSession(sourceId) { session ->
+            // 会话被删除/整条替换后是同一个实例但 incarnation 变了，旧结果不再写回
+            if (session !== dispatch.sourceSession || session.incarnation != dispatch.sourceIncarnation) {
+                return@withSession false
+            }
+            if (!session.isInitialized) {
+                // 已被回收：只从数据库重载，会话已删除时不要新建一个把它写活
+                try {
+                    session.initialize(
+                        load = { loadConversation(sourceId) },
+                        create = { throw NotFoundException("Conversation not found") },
+                    )
+                } catch (_: NotFoundException) {
+                    return@withSession false
+                }
+            }
+            // 源会话空闲时才立刻写进历史（队列暂停也能看到失败原因）；正在生成或等审批时只排队，
+            // 由续写轮次在轮次开始时写下，避免插到未完成的工具调用和审批之间。
+            var writtenInline = false
+            synchronized(session) {
+                if (session.getJob() == null && !session.state.value.isAwaitingToolApproval) {
+                    session.update { latest ->
+                        if (latest.messageNodes.any { node -> node.messages.any { it.id == message.id } }) {
+                            latest
+                        } else {
+                            latest.copy(
+                                messageNodes = latest.messageNodes + message.toMessageNode(),
+                                chatSuggestions = emptyList(),
+                            )
+                        }
+                    }
+                    writtenInline = true
+                }
+                session.messageQueue.enqueueDelivery(message, written = writtenInline)
+            }
+            if (writtenInline) session.flush()
+            true
+        }
+        if (delivered) dispatchNextQueuedMessage(sourceId)
     }
 
     // 发送、重新生成和审批失败时报告错误并暂停队列，排队的消息等用户处理完再继续
@@ -579,7 +966,14 @@ class ChatService(
      * 发送的最后一条是助手消息时从它继续（比如审批之后），回复写回那条消息。
      * 失败时报告错误、暂停消息队列并返回 [TurnResult.Failed]；取消时直接抛出。
      */
-    private suspend fun runTurn(session: ConversationSession, regenerateNodeId: Uuid? = null): TurnResult {
+    private suspend fun runTurn(
+        session: ConversationSession,
+        regenerateNodeId: Uuid? = null,
+        delegationAllowed: Boolean = true,
+        delegateAssistantExecutor: DelegateAssistantExecutor? = null,
+        expectedRequestId: Uuid? = null,
+        expectedUserMessageId: Uuid? = null,
+    ): TurnResult {
         val conversationId = session.id
         // 先清理上一轮状态；确定历史后，仅为真正的续写恢复消息 ID。
         session.replyMessageId.value = null
@@ -605,6 +999,13 @@ class ChatService(
             } else {
                 conversation.currentMessages
             }
+            if (expectedRequestId != null || expectedUserMessageId != null) {
+                val lastHistory = history.lastOrNull()
+                check(
+                    expectedRequestId != null && expectedUserMessageId != null &&
+                        lastHistory?.id == expectedUserMessageId && lastHistory.role == MessageRole.USER
+                ) { "target_user_message_mismatch" }
+            }
             val replyNodeId = when {
                 history.lastOrNull()?.role == MessageRole.ASSISTANT -> nodes[history.lastIndex].id
                 regenerateNodeId != null -> regenerateNodeId
@@ -614,7 +1015,12 @@ class ChatService(
             // 它会挂起也可能失败，期间或失败后不能还指着上一轮的回复
             session.replyMessageId.value = history.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }?.id
 
-            val turn = requestFactory.createContext(settings, conversation)
+            val turn = requestFactory.createContext(
+                settings,
+                conversation,
+                delegationAllowed,
+                delegateAssistantExecutor
+            )
             senderName = if (turn.assistant.useAssistantAvatar) {
                 turn.assistant.name.ifEmpty { context.getString(R.string.assistant_page_default_assistant) }
             } else {
@@ -623,7 +1029,7 @@ class ChatService(
             warnIfToolsUnavailable(turn, conversationId)
 
             val (request, hooks) = requestFactory.createAgent(turn, history, session.processingStatus)
-            var finishReason: AgentFinishReason? = null
+            var finishEvent: AgentEvent.Finished? = null
             try {
                 runAgent(request, hooks).flowOn(Dispatchers.IO).collect { event ->
                     when (event) {
@@ -646,7 +1052,7 @@ class ChatService(
 
                         is AgentEvent.Finished -> {
                             Log.i(TAG, "runTurn: finished (${event.reason})")
-                            finishReason = event.reason
+                            finishEvent = event
                         }
                     }
                 }
@@ -667,14 +1073,21 @@ class ChatService(
                 }
             }
 
-            val reason = checkNotNull(finishReason)
+            val finishedEvent = checkNotNull(finishEvent)
+            val reason = finishedEvent.reason
             // 等待审批时这一轮还没结束，标题、建议和记忆整理等审批之后再做
             if (reason !is AgentFinishReason.AwaitingApproval) {
                 sessionManager.launchWithSession(conversationId) { generateTitle(conversationId) }
                 sessionManager.launchWithSession(conversationId) { generateSuggestion(conversationId) }
                 if (turn.assistant.enableMemory) memoryConsolidationScheduler.onTurnFinished(session.state.value)
             }
-            return TurnResult.Finished(reason)
+            return TurnResult.Finished(
+                reason,
+                expectedRequestId,
+                expectedUserMessageId,
+                replyNodeId,
+                finishedEvent.message.id,
+            )
         } catch (e: CancellationException) {
             appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
             throw e
@@ -1086,13 +1499,57 @@ class ChatService(
      */
     suspend fun deleteConversation(conversationId: Uuid) {
         val session = sessionManager.getOrCreate(conversationId)
-        discardQueuedMessages(session)
-        session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
-            conversationRepo.getConversationById(conversationId)?.let { conversationRepo.deleteConversation(it) }
-            // 数据库那份不知道只在内存里出现过的附件
-            previous?.let { filesManager.deleteChatFiles(it.files) }
+        val deletingIncarnation = session.incarnation
+        synchronized(delegationLifecycleLock) {
+            deletingDelegationTargets[conversationId] = deletingIncarnation
+        }
+        try {
+            failDelegationsForSession(session)
+            cancelDelegationDeliveries(conversationId)
+            discardQueuedMessages(session)
+            session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
+                conversationRepo.getConversationById(conversationId)?.let { conversationRepo.deleteConversation(it) }
+                // 数据库那份不知道只在内存里出现过的附件
+                previous?.let { filesManager.deleteChatFiles(it.files) }
+            }
+        } finally {
+            synchronized(delegationLifecycleLock) {
+                if (deletingDelegationTargets[conversationId] == deletingIncarnation) {
+                    deletingDelegationTargets.remove(conversationId)
+                }
+            }
         }
         sessionManager.removeIfIdle(session)
+    }
+
+    /** 源会话被删：结果无处可投，先让等待中的 waiter 结束，再取消后台投递任务。 */
+    private fun cancelDelegationDeliveries(sourceId: Uuid) {
+        delegationContinuations.remove(sourceId)
+        synchronized(delegationLifecycleLock) {
+            // 先取消投递任务（await 被取消就不会再投递），再清掉还没被任务自己回收的登记
+            delegationDeliveryJobs.remove(sourceId)?.forEach { it.cancel() }
+            delegationSources.entries.filter { it.value == sourceId }.map { it.key }.forEach { requestId ->
+                delegationWaiters.remove(requestId)?.fail("target_conversation_deleted")
+                delegationTargets.remove(requestId)
+                delegationSources.remove(requestId)
+            }
+        }
+    }
+
+    private fun failDelegationsForSession(session: ConversationSession) {
+        synchronized(delegationLifecycleLock) {
+            val requestIds = buildSet {
+                session.messageQueue.state.value.messages.mapNotNullTo(this) { it.requestId }
+                session.submittingMessage?.requestId?.let(::add)
+                delegationTargets.entries.filter { it.value == session.id }.mapTo(this) { it.key }
+            }
+            requestIds.forEach { requestId ->
+                delegationWaiters.remove(requestId)?.fail("target_conversation_deleted")
+                delegationTargets.remove(requestId)
+                delegationSources.remove(requestId)
+            }
+        }
+        session.messageQueue.failRequestWaiters("target_conversation_deleted")
     }
 
     /** 撤销删除：写回删除前的会话，还停在这个会话上的页面也一并换回 */
@@ -1251,3 +1708,51 @@ class ChatService(
         if (session.isInitialized) finishInterruptedPendingTools(session)
     }
 }
+
+/** 工具立刻返回的回执：让模型知道任务已交给目标助手、不要等待，继续做别的事。 */
+internal fun delegationPendingText(assistantName: String, conversationId: Uuid): String = buildString {
+    append("Delegated to '")
+    append(assistantName)
+    append("' (conversation_id: ")
+    append(conversationId)
+    appendLine(").")
+    append(
+        "The task is running asynchronously; do NOT wait for it. Its result will be delivered " +
+            "automatically as a new message when ready, so continue replying to the user or do other work now."
+    )
+}
+
+internal fun queuedReplyText(
+    queuedRequestId: Uuid?,
+    queuedUserMessageId: Uuid?,
+    queuedReplyNodeId: Uuid?,
+    result: ChatServiceQueuedTurnResult,
+    finalMessageId: Uuid?,
+    currentUserRole: MessageRole?,
+    currentUserMessageId: Uuid?,
+    replyNode: MessageNode?,
+): String {
+    check(queuedRequestId != null && result.requestId == queuedRequestId) { "target_request_mismatch" }
+    check(
+        queuedUserMessageId != null && result.userMessageId == queuedUserMessageId &&
+            currentUserMessageId == queuedUserMessageId && currentUserRole == MessageRole.USER
+    ) { "target_user_message_mismatch" }
+    check(queuedReplyNodeId != null && result.replyNodeId == queuedReplyNodeId) { "target_reply_node_mismatch" }
+    check(
+        result.finished && replyNode?.id == queuedReplyNodeId &&
+            replyNode.currentMessage.role == MessageRole.ASSISTANT &&
+            replyNode.currentMessage.id == finalMessageId
+    ) { "target_reply_message_missing" }
+    return replyNode.currentMessage.toText()
+}
+
+internal fun isDelegationTurnCompleted(reason: AgentFinishReason): Boolean =
+    reason == AgentFinishReason.Completed
+
+internal data class ChatServiceQueuedTurnResult(
+    val requestId: Uuid?,
+    val userMessageId: Uuid?,
+    val replyNodeId: Uuid?,
+    val finished: Boolean,
+    val finalMessageId: Uuid?,
+)

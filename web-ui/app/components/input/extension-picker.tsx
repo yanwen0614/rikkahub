@@ -14,12 +14,7 @@ import api from "~/services/api";
 import type { ConversationDto, LorebookProfile, ModeInjectionProfile, QuickMessage } from "~/types";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTitle,
-  PopoverTrigger,
-} from "~/components/ui/popover";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "~/components/ui/popover";
 
 import { PickerErrorAlert } from "./picker-error-alert";
 
@@ -352,7 +347,12 @@ export function ExtensionPickerButton({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent side="top" align="end" sideOffset={8} className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4">
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4"
+      >
         <PopoverTitle className="text-sm">{t("injection.title")}</PopoverTitle>
 
         <div className="space-y-3">
@@ -459,12 +459,11 @@ export function ExtensionPickerButton({
                 <div className="space-y-2">
                   {modeInjections.map((item) => {
                     const checked = selectedModeInjectionIds.includes(item.id);
-                    const switching =
-                      conversation
-                        ? updateConversationInjectionsMutation.isPending &&
-                          updateConversationInjectionsMutation.variables?.key === `mode:${item.id}`
-                        : updateAssistantExtensionsMutation.isPending &&
-                          updateAssistantExtensionsMutation.variables?.key === `mode:${item.id}`;
+                    const switching = conversation
+                      ? updateConversationInjectionsMutation.isPending &&
+                        updateConversationInjectionsMutation.variables?.key === `mode:${item.id}`
+                      : updateAssistantExtensionsMutation.isPending &&
+                        updateAssistantExtensionsMutation.variables?.key === `mode:${item.id}`;
 
                     return (
                       <label
@@ -508,13 +507,11 @@ export function ExtensionPickerButton({
               <div className="space-y-2">
                 {lorebooks.map((item) => {
                   const checked = selectedLorebookIds.includes(item.id);
-                  const switching =
-                    conversation
-                      ? updateConversationInjectionsMutation.isPending &&
-                        updateConversationInjectionsMutation.variables?.key ===
-                          `lorebook:${item.id}`
-                      : updateAssistantExtensionsMutation.isPending &&
-                        updateAssistantExtensionsMutation.variables?.key === `lorebook:${item.id}`;
+                  const switching = conversation
+                    ? updateConversationInjectionsMutation.isPending &&
+                      updateConversationInjectionsMutation.variables?.key === `lorebook:${item.id}`
+                    : updateAssistantExtensionsMutation.isPending &&
+                      updateAssistantExtensionsMutation.variables?.key === `lorebook:${item.id}`;
 
                   return (
                     <label

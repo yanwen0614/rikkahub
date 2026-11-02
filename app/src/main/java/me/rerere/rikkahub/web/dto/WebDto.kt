@@ -221,6 +221,7 @@ data class MessageNodeDto(
 
 @Serializable
 data class MessageDto(
+    // Explicit wire allowlist. Delegation request/item IDs and waiter state live only in runtime queue state.
     val id: String,
     val role: String,
     val parts: List<UIMessagePart>,
@@ -366,6 +367,7 @@ fun MessageNode.toDto() = MessageNodeDto(
 fun UIMessage.toDto() = MessageDto(
     id = id.toString(),
     role = role.name,
+    // Delegation correlation stays in transient queue/session state; message payloads contain no marker.
     parts = parts,
     annotations = annotations,
     createdAt = createdAt.toString(),

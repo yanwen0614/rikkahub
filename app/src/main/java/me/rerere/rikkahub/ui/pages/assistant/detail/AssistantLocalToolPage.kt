@@ -6,12 +6,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -31,6 +33,7 @@ import me.rerere.hugeicons.stroke.ChartLineData01
 import me.rerere.hugeicons.stroke.ClipboardPaste
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.JavaScript
+import me.rerere.hugeicons.stroke.UserMultiple
 import me.rerere.hugeicons.stroke.MessageQuestion
 import me.rerere.hugeicons.stroke.SmartPhone01
 import me.rerere.hugeicons.stroke.VolumeHigh
@@ -174,6 +177,36 @@ private fun AssistantLocalToolContent(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         CardGroup {
+            switchItem(
+                checked = assistant.acceptsAssistantCalls,
+                onCheckedChange = { onUpdate(assistant.copy(acceptsAssistantCalls = it)) },
+                leadingContent = { CardGroupIcon(HugeIcons.UserMultiple) },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_accept_assistant_calls_desc))
+                },
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_accept_assistant_calls_title))
+                },
+            )
+            if (assistant.acceptsAssistantCalls) {
+                formItem(
+                    headlineContent = {
+                        Text(stringResource(R.string.assistant_page_delegation_description_title))
+                    },
+                    supportingContent = {
+                        Text(stringResource(R.string.assistant_page_delegation_description_desc))
+                    },
+                ) {
+                    OutlinedTextField(
+                        value = assistant.delegationDescription,
+                        onValueChange = { onUpdate(assistant.copy(delegationDescription = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                }
+            }
+        }
+        CardGroup {
             toolItem(
                 option = LocalToolOption.JavascriptEngine,
                 icon = HugeIcons.JavaScript,
@@ -221,6 +254,12 @@ private fun AssistantLocalToolContent(
                 icon = HugeIcons.ChartLineData01,
                 title = R.string.assistant_page_local_tools_chart_display_title,
                 description = R.string.assistant_page_local_tools_chart_display_desc,
+            )
+            toolItem(
+                option = LocalToolOption.DelegateAssistant,
+                icon = HugeIcons.UserMultiple,
+                title = R.string.assistant_page_local_tools_delegate_assistant_title,
+                description = R.string.assistant_page_local_tools_delegate_assistant_desc,
             )
         }
     }

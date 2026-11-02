@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.tts.provider.TTSManager
@@ -30,7 +31,14 @@ class LocalTools(
 
     val chartDisplayTool by lazy { buildChartDisplayTool() }
 
-    fun getTools(options: List<LocalToolOption>): List<Tool> {
+    fun getTools(
+        options: List<LocalToolOption>,
+        sourceAssistantId: kotlin.uuid.Uuid? = null,
+        sourceConversationId: kotlin.uuid.Uuid? = null,
+        delegationAllowed: Boolean = true,
+        delegateAssistantExecutor: DelegateAssistantExecutor? = null,
+        settingsSnapshot: Settings? = null,
+    ): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
             tools.add(javascriptTool)
@@ -56,6 +64,21 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.ChartDisplay)) {
             tools.add(chartDisplayTool)
+        }
+        if (shouldCreateDelegateAssistantTool(options.contains(LocalToolOption.DelegateAssistant), delegationAllowed) &&
+            sourceAssistantId != null && sourceConversationId != null
+        ) {
+            val settings = settingsSnapshot ?: settingsStore.settingsFlow.value
+            tools.add(
+                buildDelegateAssistantTool(
+                    settingsStore = settingsStore,
+                    availableAssistants = settings.assistants
+                        .filter { it.id != sourceAssistantId && it.acceptsAssistantCalls },
+                    sourceAssistantId = sourceAssistantId,
+                    sourceConversationId = sourceConversationId,
+                    executor = delegateAssistantExecutor,
+                )
+            )
         }
         return tools
     }

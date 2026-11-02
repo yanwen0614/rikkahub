@@ -46,7 +46,7 @@ function AppContent() {
     <ThemeProvider defaultTheme="system">
       <Outlet />
       <WebAuthGate />
-      <Toaster position="top-center"/>
+      <Toaster position="top-center" />
     </ThemeProvider>
   );
 }

@@ -14,12 +14,7 @@ import api from "~/services/api";
 import type { BuiltInTool, ConversationDto, ProviderModel, SearchServiceOption } from "~/types";
 import { AIIcon } from "~/components/ui/ai-icon";
 import { Button } from "~/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTitle,
-  PopoverTrigger,
-} from "~/components/ui/popover";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "~/components/ui/popover";
 import { Switch } from "~/components/ui/switch";
 
 import { PickerErrorAlert } from "./picker-error-alert";
@@ -209,7 +204,12 @@ export function SearchPickerButton({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent side="top" align="end" sideOffset={8} className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4">
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4"
+      >
         <PopoverTitle className="text-sm">{t("search.title")}</PopoverTitle>
 
         <div className="space-y-3">
@@ -229,7 +229,10 @@ export function SearchPickerButton({
                 disabled={disabled || loading}
                 onCheckedChange={(nextChecked) => {
                   if (!canUse || !currentModel) return;
-                  toggleBuiltInSearchMutation.mutate({ modelId: currentModel.id, enabled: nextChecked });
+                  toggleBuiltInSearchMutation.mutate({
+                    modelId: currentModel.id,
+                    enabled: nextChecked,
+                  });
                 }}
               />
             </div>
@@ -295,7 +298,11 @@ export function SearchPickerButton({
                               {getServiceType(service) ?? t("search.unknown")}
                             </div>
                           </div>
-                          {switching ? <LoaderCircle className="size-3.5 animate-spin" /> : selected ? <Check className="size-3.5 text-primary" /> : null}
+                          {switching ? (
+                            <LoaderCircle className="size-3.5 animate-spin" />
+                          ) : selected ? (
+                            <Check className="size-3.5 text-primary" />
+                          ) : null}
                         </button>
                       );
                     })}

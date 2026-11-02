@@ -13,12 +13,7 @@ import { cn } from "~/lib/utils";
 import api from "~/services/api";
 import type { ConversationDto, McpToolOption } from "~/types";
 import { Button } from "~/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTitle,
-  PopoverTrigger,
-} from "~/components/ui/popover";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "~/components/ui/popover";
 import { Switch } from "~/components/ui/switch";
 
 import { PickerErrorAlert } from "./picker-error-alert";
@@ -167,7 +162,12 @@ export function McpPickerButton({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent side="top" align="end" sideOffset={8} className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4">
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="w-[min(92vw,20rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto space-y-3 p-4"
+      >
         <PopoverTitle className="text-sm">{t("mcp.title")}</PopoverTitle>
 
         <div className="space-y-3">

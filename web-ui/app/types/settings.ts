@@ -69,6 +69,8 @@ export interface AssistantProfile {
   modeInjectionIds?: string[];
   lorebookIds?: string[];
   allowConversationSystemPrompt?: boolean;
+  acceptsAssistantCalls?: boolean;
+  delegationDescription?: string;
   name: string;
   avatar?: AssistantAvatar;
   useAssistantAvatar?: boolean;

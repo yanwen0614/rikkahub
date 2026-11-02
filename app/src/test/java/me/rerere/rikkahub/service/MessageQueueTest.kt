@@ -2,7 +2,12 @@ package me.rerere.rikkahub.service
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import me.rerere.ai.agent.AgentFinishReason
+import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,6 +16,109 @@ import org.junit.Test
 
 class MessageQueueTest {
     private fun text(value: String) = listOf(UIMessagePart.Text(value))
+
+    @Test
+    fun `only completed agent turns can return delegated output`() {
+        assertTrue(isDelegationTurnCompleted(AgentFinishReason.Completed))
+        assertFalse(isDelegationTurnCompleted(AgentFinishReason.AwaitingApproval(emptySet())))
+        assertFalse(isDelegationTurnCompleted(AgentFinishReason.StepLimitReached))
+    }
+
+    @Test
+    fun `queued reply correlation requires matching request user and assistant reply`() {
+        val requestId = kotlin.uuid.Uuid.random()
+        val userId = kotlin.uuid.Uuid.random()
+        val userNode = UIMessage(id = userId, role = MessageRole.USER, parts = text("request")).toMessageNode()
+        val replyNode = UIMessage(role = MessageRole.ASSISTANT, parts = text("answer")).toMessageNode()
+        val result = ChatServiceQueuedTurnResult(requestId, userId, replyNode.id, finished = true, finalMessageId = replyNode.currentMessage.id)
+
+        assertEquals("answer", queuedReplyText(requestId, userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userId, replyNode))
+        assertEquals("target_request_mismatch", runCatching {
+            queuedReplyText(kotlin.uuid.Uuid.random(), userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_user_message_mismatch", runCatching {
+            queuedReplyText(requestId, userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userNode.id, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_node_mismatch", runCatching {
+            queuedReplyText(requestId, userId, kotlin.uuid.Uuid.random(), result, replyNode.currentMessage.id, MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_message_missing", runCatching {
+            queuedReplyText(requestId, userId, replyNode.id, result.copy(finished = false), replyNode.currentMessage.id, MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_message_missing", runCatching {
+            queuedReplyText(requestId, userId, replyNode.id, result, kotlin.uuid.Uuid.random(), MessageRole.USER, userId, replyNode)
+        }.exceptionOrNull()?.message)
+        assertEquals("target_reply_message_missing", runCatching {
+            queuedReplyText(
+                requestId, userId, replyNode.id, result, replyNode.currentMessage.id, MessageRole.USER, userId,
+                MessageNode(id = replyNode.id, messages = listOf(UIMessage(role = MessageRole.USER, parts = text("wrong role")))),
+            )
+        }.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `assigning request ids returns unique delegation ids while normal replies stay unassigned`() {
+        val queue = MessageQueue()
+        val first = queue.enqueue(text("first delegation"), assignRequestId = true)
+        val second = queue.enqueue(text("second delegation"), assignRequestId = true)
+        val voiceReply = CompletableDeferred<String?>()
+        val voice = queue.enqueue(text("voice reply"), reply = voiceReply)
+
+        assertTrue(first?.requestId != null)
+        assertTrue(second?.requestId != null)
+        assertFalse(first?.requestId == second?.requestId)
+        assertNull(voice?.requestId)
+    }
+
+    @Test
+    fun `delegation correlation stays on the dispatched item and pending removal fails only its waiter`() = runBlocking {
+        val queue = MessageQueue()
+        val requestId = kotlin.uuid.Uuid.random()
+        val reply = CompletableDeferred<String?>()
+        queue.enqueue(text("target"), reply = reply, requestId = requestId)
+        val queuedId = queue.state.value.messages.single().id
+        val removed = queue.removeById(queuedId)
+        assertEquals(requestId, removed?.requestId)
+        assertTrue(reply.isCompleted)
+        assertNull(reply.getCompleted())
+        assertNull(queue.takeNext())
+
+        val startedWaiter = CompletableDeferred<String?>()
+        queue.enqueue(text("started"), reply = startedWaiter, requestId = requestId)
+        val started = queue.takeNext()!!
+        assertEquals(requestId, started.requestId)
+        assertFalse(startedWaiter.isCompleted)
+    }
+
+    @Test
+    fun `approval and deletion failures are returned to delegation request`() = runBlocking {
+        val queue = MessageQueue()
+        val approval = CompletableDeferred<String?>()
+        val deletion = CompletableDeferred<String?>()
+        queue.enqueue(text("approval"), reply = approval, requestId = kotlin.uuid.Uuid.random())
+        queue.enqueue(text("deleted"), reply = deletion, requestId = kotlin.uuid.Uuid.random())
+        queue.failRequestWaiters("target_conversation_deleted")
+        assertEquals("target_conversation_deleted", runCatching { approval.await() }.exceptionOrNull()?.message)
+        assertEquals("target_conversation_deleted", runCatching { deletion.await() }.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `removing a still queued delegation by item id does not affect a started waiter`() = runBlocking {
+        val queue = MessageQueue()
+        val pendingReply = CompletableDeferred<String?>()
+        val pending = queue.enqueue(text("pending"), reply = pendingReply, requestId = kotlin.uuid.Uuid.random())!!
+        val pendingId = queue.state.value.messages.single().id
+        val removed = queue.removeByIdAndFail(pendingId, "delegation_wait_cancelled")
+        assertEquals(pending.id, removed?.id)
+        assertEquals("delegation_wait_cancelled", runCatching { pendingReply.await() }.exceptionOrNull()?.message)
+
+        val startedReply = CompletableDeferred<String?>()
+        queue.enqueue(text("started"), reply = startedReply, requestId = kotlin.uuid.Uuid.random())
+        val started = queue.takeNext()!!
+        assertTrue(startedReply.isActive)
+        assertEquals(null, queue.removeByIdAndFail(started.id, "delegation_wait_cancelled"))
+        assertTrue(startedReply.isActive)
+    }
 
     @Test
     fun `editing a voice message preserves its reply observer and queue position`() {
@@ -165,6 +273,73 @@ class MessageQueueTest {
         parts.clear()
 
         assertEquals(text("original"), queue.takeNext()!!.parts)
+    }
+
+    @Test
+    fun `delegation delivery is queued behind the current turn and carries its result message`() {
+        val queue = MessageQueue()
+        queue.enqueue(text("user turn"))
+        val result = UIMessage(
+            role = MessageRole.USER,
+            parts = text("delegated result"),
+        )
+        queue.enqueueDelivery(result)
+
+        val first = queue.takeNext()!!
+        assertFalse(first.deliverOnly)
+        val delivery = queue.takeNext()!!
+        assertTrue(delivery.deliverOnly)
+        assertEquals(result, delivery.deliveryMessage)
+        assertEquals(emptyList<UIMessagePart>(), delivery.parts)
+        assertNull(delivery.requestId)
+        assertFalse(delivery.deliveryWritten)
+        assertNull(queue.takeNext())
+    }
+
+    @Test
+    fun `delivery enqueued after an inline write is not written twice`() {
+        val queue = MessageQueue()
+        val result = UIMessage.user("delegated result")
+        val queued = queue.enqueueDelivery(result, written = true)
+
+        assertTrue(queued.deliveryWritten)
+        assertTrue(queue.takeNext()!!.deliveryWritten)
+    }
+
+    @Test
+    fun `delegation delivery waits for a paused queue and survives reprocessing`() {
+        val queue = MessageQueue()
+        val result = UIMessage.user("delegated result")
+        queue.enqueueDelivery(result)
+        queue.pause()
+        assertNull(queue.takeNext())
+        assertEquals(1, queue.state.value.messages.size)
+
+        queue.resume()
+        assertEquals(result, queue.takeNext()!!.deliveryMessage)
+    }
+
+    @Test
+    fun `delegation delivery is not blocked by editing a real queued message`() {
+        val queue = MessageQueue()
+        queue.enqueue(text("first"))
+        queue.enqueueDelivery(UIMessage.user("delegated result"))
+        val firstId = queue.state.value.messages.first().id
+        queue.beginEdit(firstId)
+
+        assertNull(queue.takeNext())
+        queue.finishEdit(firstId, text("edited"))
+        assertEquals(text("edited"), queue.takeNext()!!.parts)
+        assertTrue(queue.takeNext()!!.deliverOnly)
+    }
+
+    @Test
+    fun `delegation pending text tells the model not to wait`() {
+        val text = delegationPendingText("Target", kotlin.uuid.Uuid.random())
+        assertTrue(text.contains("Delegated to 'Target'"))
+        assertTrue(text.contains("conversation_id: "))
+        assertTrue(text.contains("do NOT wait"))
+        assertTrue(text.contains("delivered"))
     }
 
     @Test
