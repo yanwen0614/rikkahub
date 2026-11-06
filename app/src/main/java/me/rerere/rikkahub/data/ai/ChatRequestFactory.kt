@@ -128,15 +128,14 @@ class ChatRequestFactory(
             workspaceCwd = conversation.workspaceCwd,
             memories = if (assistant.enableMemory) memoryRepository.getFiles(assistant.memoryId) else emptyList(),
             tools = chatToolFactory.createTools(
-                settings = latestSettings,
-                assistant = assistant,
-                model = model,
-                conversationId = conversation.id,
-                workspaceCwd = conversation.workspaceCwd,
-                conversationId = conversation.id,
-                delegationAllowed = delegationAllowed,
-                delegateAssistantExecutor = delegateAssistantExecutor,
-            ),
+                    settings = latestSettings,
+                    assistant = assistant,
+                    model = model,
+                    conversationId = conversation.id,
+                    workspaceCwd = conversation.workspaceCwd,
+                    delegationAllowed = delegationAllowed,
+                    delegateAssistantExecutor = delegateAssistantExecutor,
+                ),
         )
     }
 

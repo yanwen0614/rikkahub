@@ -746,11 +746,11 @@ class ChatService(
                         "target_conversation_deleted"
                     )
                 }
-                target.messageQueue.resume()
-                target.messageQueue.enqueue(
+                target.inbox.resume()
+                target.inbox.enqueue(
                     listOf(UIMessagePart.Text(request.message)),
                     reply = waiter.deferred,
-                    assignRequestId = true,
+                    requestId = Uuid.random(),
                 )?.let { queued ->
                     val queuedRequestId = checkNotNull(queued.requestId)
                     requestId = queuedRequestId
@@ -759,7 +759,7 @@ class ChatService(
                     delegationTargets[queuedRequestId] = targetId
                     delegationSources[queuedRequestId] = request.sourceConversationId
                 } ?: throw IllegalStateException("target_queue_item_missing")
-                dispatchNextQueuedMessage(targetId)
+                dispatchInbox(targetId)
             }
             return DelegationDispatch(
                 targetId = targetId,
@@ -772,7 +772,7 @@ class ChatService(
         } catch (e: CancellationException) {
             // Remove only while pending. Once dequeued, target generation owns its lifecycle.
             itemId?.let { id ->
-                target.messageQueue.removeByIdAndFail(id, "delegation_wait_cancelled")
+                target.inbox.removeByIdAndFail(id, "delegation_wait_cancelled")
             }
             requestId?.let { id ->
                 delegationWaiters.remove(id, waiter)
@@ -782,7 +782,7 @@ class ChatService(
             throw e
         } catch (e: Exception) {
             itemId?.let { id ->
-                target.messageQueue.removeByIdAndFail(id, "delegation_dispatch_failed")
+                target.inbox.removeByIdAndFail(id, "delegation_dispatch_failed")
             }
             requestId?.let { id ->
                 delegationWaiters.remove(id, waiter)
@@ -892,12 +892,12 @@ class ChatService(
                     }
                     writtenInline = true
                 }
-                session.messageQueue.enqueueDelivery(message, written = writtenInline)
+                session.inbox.enqueueDelivery(message, written = writtenInline)
             }
             if (writtenInline) session.flush()
             true
         }
-        if (delivered) dispatchNextQueuedMessage(sourceId)
+        if (delivered) dispatchInbox(sourceId)
     }
 
     /** 只有通知在等时开的一轮：通知存成一个 user 节点，模型的回复是它的下一个节点 */
@@ -1628,7 +1628,7 @@ class ChatService(
     private fun failDelegationsForSession(session: ConversationSession) {
         synchronized(delegationLifecycleLock) {
             val requestIds = buildSet {
-                session.messageQueue.state.value.messages.mapNotNullTo(this) { it.requestId }
+                session.inbox.state.value.messages.mapNotNullTo(this) { it.requestId }
                 session.submittingMessage?.requestId?.let(::add)
                 delegationTargets.entries.filter { it.value == session.id }.mapTo(this) { it.key }
             }
@@ -1638,7 +1638,7 @@ class ChatService(
                 delegationSources.remove(requestId)
             }
         }
-        session.messageQueue.failRequestWaiters("target_conversation_deleted")
+        session.inbox.failRequestWaiters("target_conversation_deleted")
     }
 
     /** 撤销删除：写回删除前的会话，还停在这个会话上的页面也一并换回 */

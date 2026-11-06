@@ -26,6 +26,18 @@ interface MessageNodeDAO {
         offset: Int
     ): List<MessageNodeEntity>
 
+    @Query(
+        "SELECT * FROM message_node WHERE conversation_id = :conversationId " +
+            "ORDER BY node_index DESC LIMIT :limit"
+    )
+    suspend fun getTailNodesOfConversation(
+        conversationId: String,
+        limit: Int
+    ): List<MessageNodeEntity>
+
+    @Query("SELECT COUNT(*) FROM message_node WHERE conversation_id = :conversationId")
+    suspend fun countNodesOfConversation(conversationId: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(nodes: List<MessageNodeEntity>)
 

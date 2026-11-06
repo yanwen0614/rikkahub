@@ -301,6 +301,42 @@ class ConversationRepository(
         }
     }
 
+    /**
+     * 只加载对话尾部 [tailCount] 个 MessageNode（最新的节点），避免全量加载。
+     * [skipFromEnd] 表示跳过最近多少个 node。返回 Conversation 中的节点为 ASC（从旧到新）顺序。
+     */
+    suspend fun getConversationTail(
+        uuid: Uuid,
+        tailCount: Int,
+        skipFromEnd: Int,
+    ): Conversation? {
+        val entity = conversationDAO.getConversationById(uuid.toString()) ?: return null
+        val loadCount = (skipFromEnd + tailCount).coerceIn(1, messageNodeDAO.countNodesOfConversation(entity.id)) + 1
+
+        val favoriteNodeIds = favoriteDAO
+            .getFavoriteNodeIdsOfConversation(entity.id)
+            .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
+            .toSet()
+
+        // getTailNodesOfConversation 返回 DESC（最新的在前），反转回 ASC
+        val tailDesc = messageNodeDAO.getTailNodesOfConversation(entity.id, loadCount)
+        val tailAsc = tailDesc
+            .drop(skipFromEnd.coerceAtMost(tailDesc.size))
+            .reversed()
+            .take(tailCount)
+
+        val nodes = tailAsc.map { nodeEntity ->
+            val messages = JsonInstant.decodeFromString<List<UIMessage>>(nodeEntity.messages)
+            MessageNode(
+                id = Uuid.parse(nodeEntity.id),
+                messages = messages,
+                selectIndex = nodeEntity.selectIndex,
+                isFavorite = favoriteNodeIds.contains(Uuid.parse(nodeEntity.id))
+            )
+        }
+        return conversationEntityToConversation(entity, nodes)
+    }
+
     suspend fun existsConversationById(uuid: Uuid): Boolean {
         return conversationDAO.existsById(uuid.toString())
     }

@@ -619,13 +619,6 @@ const ChatMessageContextCheckpoint = React.memo(
     </div>
   );
 });
-            )}
-          </div>
-        )}
-      </div>
-    );
-  },
-);
 
 export const ChatMessage = React.memo(
   ({

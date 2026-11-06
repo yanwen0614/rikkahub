@@ -54,7 +54,6 @@ class ChatToolFactory(
         model: Model,
         conversationId: Uuid,
         workspaceCwd: String? = null,
-        conversationId: Uuid? = null,
         delegationAllowed: Boolean = true,
         delegateAssistantExecutor: DelegateAssistantExecutor? = null,
     ): List<Tool> {

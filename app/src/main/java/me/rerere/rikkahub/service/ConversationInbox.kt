@@ -3,6 +3,7 @@ package me.rerere.rikkahub.service
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.data.model.Conversation
@@ -22,7 +23,17 @@ data class QueuedMessage(
     val isEditing: Boolean = false,
     // Optional in-memory observer; null result means the queued message was withdrawn.
     val reply: CompletableDeferred<String?>? = null,
-) : InboxItem
+    // 委托/队列跟踪（由 MessageQueue 同名字段迁移而来）
+    val requestId: Uuid? = null,
+    var userMessageId: Uuid? = null,
+    var replyNodeId: Uuid? = null,
+    // 委托结果投递：不再新增用户消息，直接在这条结果消息之后继续回复
+    val deliveryMessage: UIMessage? = null,
+    // 结果消息是否在投递时就已写入历史；已写入的轮次开始时不再重复追加
+    var deliveryWritten: Boolean = false,
+) : InboxItem {
+    val deliverOnly: Boolean get() = deliveryMessage != null
+}
 
 /**
  * 运行时事件，例如后台命令结束：正在生成时在下一步请求模型前插进这一轮，空闲时单独开一轮。
@@ -75,18 +86,21 @@ class ConversationInbox {
     val state = mutableState.asStateFlow()
 
     @Synchronized
-    fun enqueue(parts: List<UIMessagePart>, answer: Boolean = true, reply: CompletableDeferred<String?>? = null) {
+    fun enqueue(parts: List<UIMessagePart>, answer: Boolean = true, reply: CompletableDeferred<String?>? = null, requestId: Uuid? = null): QueuedMessage? {
         if (parts.isEmptyInputMessage()) {
             reply?.complete(null)
-            return
+            return null
         }
-        mutableState.value = state.value.copy(
-            items = state.value.items + QueuedMessage(
-                parts = parts.toList(),
-                answer = answer,
-                reply = reply,
-            ),
+        val queued = QueuedMessage(
+            parts = parts.toList(),
+            answer = answer,
+            reply = reply,
+            requestId = requestId,
         )
+        mutableState.value = state.value.copy(
+            items = state.value.items + queued,
+        )
+        return queued
     }
 
     /** 放入一条通知；同一来源已有没发出的通知时原地替换 */
@@ -186,5 +200,37 @@ class ConversationInbox {
     @Synchronized
     fun resume() {
         mutableState.value = state.value.copy(paused = false)
+    }
+
+    /**
+     * 排一个"投递后继续回复"的轮次（委托）：结果消息随队列项一起带到轮次开始，写进会话历史再生成，
+     * 保证不会插到正在生成或等审批的那一轮中间。
+     *
+     * [written] 表示调用方已经趁会话空闲把结果写进了历史，轮次开始时就不必再写一遍。
+     */
+    @Synchronized
+    fun enqueueDelivery(message: UIMessage, written: Boolean = false): QueuedMessage {
+        val queued = QueuedMessage(
+            parts = emptyList(),
+            answer = true,
+            deliveryMessage = message,
+            deliveryWritten = written,
+        )
+        mutableState.value = state.value.copy(items = state.value.items + queued)
+        return queued
+    }
+
+    /** 按 id 移除并让它的 reply waiter 异常结束 */
+    @Synchronized
+    fun removeByIdAndFail(id: Uuid, message: String): QueuedMessage? {
+        val removed = state.value.items.firstOrNull { it.id == id } as? QueuedMessage ?: return null
+        mutableState.value = state.value.copy(items = state.value.items.filterNot { it.id == id })
+        removed.reply?.completeExceptionally(IllegalStateException(message))
+        return removed
+    }
+
+    /** 让所有有 requestId 的排队项失败 */
+    fun failRequestWaiters(message: String) {
+        state.value.messages.filter { it.requestId != null }.forEach { removeByIdAndFail(it.id, message) }
     }
 }

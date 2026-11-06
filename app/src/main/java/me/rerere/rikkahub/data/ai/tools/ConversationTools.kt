@@ -71,8 +71,9 @@ fun createConversationTools(
     Tool(
         name = "conversation_read",
         description = """
-            Read the user and assistant messages of one conversation, by position.
+            Read the most recent messages from one conversation, newest first.
             Only user and assistant text is returned; reasoning content and tool call results are excluded.
+            Use offset to skip the latest messages and read further back.
             Use it when a search snippet needs surrounding context, or to read a full conversation.
         """.trimIndent(),
         parameters = {
@@ -84,7 +85,7 @@ fun createConversationTools(
                     })
                     put("offset", buildJsonObject {
                         put("type", "integer")
-                        put("description", "Position of the first message to return (default: 0)")
+                        put("description", "Number of most recent messages to skip (default: 0, max: 200)")
                     })
                     put("limit", buildJsonObject {
                         put("type", "integer")
@@ -99,18 +100,19 @@ fun createConversationTools(
         },
         execute = {
             val args = it.jsonObject
-            val conversation = args["conversation_id"]?.jsonPrimitive?.contentOrNull
-                ?.let { id -> runCatching { Uuid.parse(id) }.getOrNull() }
-                ?.let { id -> conversationRepo.getConversationById(id) }
-                ?: error("conversation not found")
-            val offset = (args["offset"]?.jsonPrimitive?.intOrNull ?: 0).coerceAtLeast(0)
+            val id = args["conversation_id"]?.jsonPrimitive?.contentOrNull
+                ?.let { raw -> runCatching { Uuid.parse(raw) }.getOrNull() }
+                ?: error("conversation_id is required and must be a valid UUID")
+            val offset = (args["offset"]?.jsonPrimitive?.intOrNull ?: 0).coerceIn(0, 200)
             val limit = (args["limit"]?.jsonPrimitive?.intOrNull ?: READ_DEFAULT_LIMIT).coerceIn(1, READ_MAX_LIMIT)
+            val conversation = conversationRepo.getConversationTail(id, limit, offset)
+                ?: error("conversation not found")
             val messages = conversation.dialogueMessages()
+            // messages are in ASC (oldest first) order; reverse for newest-first output
             val payload = buildJsonObject {
                 put("title", conversation.title.ifBlank { "Untitled" })
-                put("total", messages.size)
                 put("messages", buildJsonArray {
-                    messages.drop(offset).take(limit).forEachIndexed { index, message ->
+                    messages.reversed().forEachIndexed { index, message ->
                         add(buildJsonObject {
                             put("position", offset + index)
                             put("role", message.role.name)

@@ -69,7 +69,6 @@ class ConversationSession(
         private set
 
     val inbox = ConversationInbox()
-    val messageQueue = MessageQueue()
 
     /**
      * 页面切换和 SSE 重连只加载一次。[load] 返回 null 表示数据库里没有这个会话，改用 [create] 新建。
