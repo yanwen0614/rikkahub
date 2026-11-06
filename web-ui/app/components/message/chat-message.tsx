@@ -80,6 +80,8 @@ function hasRenderablePart(part: UIMessagePart): boolean {
       return part.reasoning.trim().length > 0;
     case "tool":
       return true;
+    case "notice":
+      return false;
   }
 }
 
@@ -99,6 +101,8 @@ function formatPartForCopy(part: UIMessagePart, t: TFunction): string | null {
       return part.reasoning;
     case "tool":
       return `[${t("chat_message.copy_tool")}] ${part.toolName}`;
+    case "notice":
+      return null;
   }
 }
 
@@ -573,44 +577,48 @@ const ChatMessageContextCheckpoint = React.memo(
           <span className="h-px flex-1 bg-border" />
         </button>
 
-        {expanded && (
-          <div className="flex flex-col gap-2 rounded-lg bg-muted px-4 py-3 text-sm">
-            <p className="text-xs text-muted-foreground">
-              {t("chat_message.context_checkpoint_hint")}
-            </p>
-            <MessageParts parts={message.parts} />
-            {(onEdit || onDelete) && (
-              <div className="flex justify-end gap-1">
-                {onEdit && (
-                  <Button
-                    disabled={deleting}
-                    onClick={() => {
-                      void onEdit(message);
-                    }}
-                    size="xs"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Pencil className="size-3.5" />
-                    {t("chat_message.edit")}
-                  </Button>
-                )}
-                {onDelete && (
-                  <Button
-                    className="text-destructive hover:text-destructive"
-                    disabled={deleting}
-                    onClick={() => {
-                      void handleDelete();
-                    }}
-                    size="xs"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Trash2 className="size-3.5" />
-                    {t("chat_message.delete")}
-                  </Button>
-                )}
-              </div>
+      {expanded && (
+        <div className="flex flex-col gap-2 rounded-lg bg-muted px-4 py-3 text-sm">
+          <p className="text-xs text-muted-foreground">{t("chat_message.context_checkpoint_hint")}</p>
+          <MessageParts parts={message.parts} />
+          {(onEdit || onDelete) && (
+            <div className="flex justify-end gap-1">
+              {onEdit && (
+                <Button
+                  disabled={deleting}
+                  onClick={() => {
+                    void onEdit(message);
+                  }}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Pencil className="size-3.5" />
+                  {t("chat_message.edit")}
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  className="text-destructive hover:text-destructive"
+                  disabled={deleting}
+                  onClick={() => {
+                    void handleDelete();
+                  }}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-3.5" />
+                  {t("chat_message.delete")}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
             )}
           </div>
         )}

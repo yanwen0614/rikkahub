@@ -68,6 +68,7 @@ class ConversationSession(
     var incarnation = 0
         private set
 
+    val inbox = ConversationInbox()
     val messageQueue = MessageQueue()
 
     /**
@@ -233,9 +234,15 @@ class ConversationSession(
     private val activeJobs = mutableSetOf<Job>()
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
+
+    // 压缩中不自动开始新的一轮，否则摘要返回时发现正在生成，这次压缩就作废了
+    @Volatile
+    var isCompressing = false
+        internal set
+
     val isInUse: Boolean
         get() = refCount.get() > 0 || _generationJob.value != null ||
-            messageQueue.state.value.messages.isNotEmpty()
+            inbox.state.value.items.isNotEmpty()
 
     // 空闲检查任务
     private var idleCheckJob: Job? = null
