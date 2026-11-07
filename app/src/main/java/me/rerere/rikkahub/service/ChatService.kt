@@ -157,6 +157,9 @@ class ChatService(
             }
             if (previous != null && previous.messageNodes !== current.messageNodes) {
                 withContext(Dispatchers.IO) { deleteUnreferencedFiles(previous, current) }
+                val currentNodeIds = current.messageNodes.mapTo(HashSet()) { it.id }
+                val removedNodeIds = previous.messageNodes.map { it.id }.filterNot { it in currentNodeIds }
+                if (removedNodeIds.isNotEmpty()) conversationRepo.deleteNodeFavorites(current.id, removedNodeIds)
             }
         }
     }
