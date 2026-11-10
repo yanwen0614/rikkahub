@@ -40,4 +40,7 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("delegate_assistant")
     data object DelegateAssistant : LocalToolOption()
+
+    @SerialName("phone_use")
+    data object PhoneUse : LocalToolOption()
 }
