@@ -1,7 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -34,6 +33,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.json
+import me.rerere.ai.util.logRequestBody
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.common.http.await
@@ -200,7 +200,7 @@ class OpenAIProvider(
                 .mergeCustomBody(params.customBody)
         )
 
-        Log.i(TAG, "generateImage: $requestBody")
+        logRequestBody(TAG, "generateImage") { requestBody.toString() }
 
         val requestBuilder = Request.Builder()
             .url("${providerSetting.baseUrl}/images/generations")
