@@ -1103,10 +1103,10 @@ class ChatService(
             }
 
             var target = replyTargetOf(conversation, regenerateNodeId)
-            if (expectedRequestId != null || expectedUserMessageId != null) {
+            if (expectedRequestId != null) {
                 val lastHistory = target.history.lastOrNull()
                 check(
-                    expectedRequestId != null && expectedUserMessageId != null &&
+                    expectedUserMessageId != null &&
                         lastHistory?.id == expectedUserMessageId && lastHistory.role == MessageRole.USER
                 ) { "target_user_message_mismatch" }
             }
